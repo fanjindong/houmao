@@ -44,15 +44,14 @@ https://pay.ldxp.cn/shopApi/Shop/goodsList
 2. 脚本须在 `document-start` 阶段注入以下 CSS 规则：
 
    ```css
-   [item-selector=".goods_item"]:has(.stock.rank0) {
+   [item-selector=".goods_item"] {
      display: flex !important;
      flex-wrap: wrap !important;
      height: auto !important;
    }
 
-   [item-selector=".goods_item"]:has(.stock.rank0) > .goods_item {
-     position: relative !important;
-     inset: auto !important;
+   [item-selector=".goods_item"] > .goods_item {
+     position: static !important;
    }
 
    html:not(.houmao-show-out-of-stock) .goods_item:has(.stock.rank0) {
@@ -63,7 +62,7 @@ https://pay.ldxp.cn/shopApi/Shop/goodsList
 3. 分类切换、搜索及“加载更多”插入的新商品须自动受同一规则约束。
 4. Masonry 主题须改用原生 flex 重排剩余卡片，避免隐藏绝对定位卡片后留下空洞。
 5. 不带 `.stock.rank0` 的商品卡片保持原样。
-6. 有缺货商品时，在商品容器尾部增加“显示所有缺货商品”按钮。
+6. 有缺货商品时，在商品容器外层列表尾部增加“显示所有缺货商品”按钮，避免按钮参与商品布局。
 7. 按钮须始终位于商品卡片之后；“加载更多”新增卡片后仍须归位到末尾。
 8. 点击按钮后，本页展示全部缺货商品并移除所有该按钮；后续新增商品亦保持展示。
 9. 刷新页面后恢复默认隐藏状态。

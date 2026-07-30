@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LDxP 隐藏缺货商品
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.1.0
+// @version      0.1.1
 // @description  自动隐藏 pay.ldxp.cn 商铺中的缺货商品
 // @match        https://pay.ldxp.cn/shop/*
 // @run-at       document-start
@@ -15,23 +15,22 @@
 
   const showAllClass = 'houmao-show-out-of-stock';
   const buttonClass = 'houmao-show-out-of-stock-button';
-  const listSelector = '[item-selector=".goods_item"], .goods_content ._index .list:not(:has(> [item-selector=".goods_item"]))';
+  const listSelector = '.goods_content ._index .list';
   const style = document.createElement('style');
   style.textContent = `
-    [item-selector=".goods_item"]:has(.stock.rank0) {
+    [item-selector=".goods_item"] {
       display: flex !important;
       flex-wrap: wrap !important;
       height: auto !important;
     }
-    [item-selector=".goods_item"]:has(.stock.rank0) > .goods_item {
-      position: relative !important;
-      inset: auto !important;
+    [item-selector=".goods_item"] > .goods_item {
+      position: static !important;
     }
     html:not(.${showAllClass}) .goods_item:has(.stock.rank0) {
       display: none !important;
     }
     .${buttonClass} {
-      flex: 0 0 218px;
+      width: calc(100% - 12px);
       min-height: 44px;
       margin: 0 6px 12px;
       color: #2275ff;

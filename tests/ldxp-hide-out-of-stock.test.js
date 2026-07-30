@@ -15,12 +15,14 @@ test('真实页面的缺货与 Masonry 契约保持稳定', () => {
   assert.equal(page.match(/class="goods_item\b/g)?.length, 20);
   assert.equal(page.match(/class="stock rank0\b/g)?.length, 16);
   assert.equal(page.match(/item-selector="\.goods_item"/g)?.length, 1);
+  assert.match(script, /@version\s+0\.1\.1/);
   assert.match(script, /html:not\(\.\$\{showAllClass\}\) \.goods_item:has\(\.stock\.rank0\)/);
-  assert.match(script, /display: flex !important/);
-  assert.match(script, /inset: auto !important/);
+  assert.match(script, /\[item-selector="\.goods_item"\] \{[\s\S]*display: flex !important/);
+  assert.match(script, /position: static !important/);
+  assert.doesNotMatch(script, /\[item-selector="\.goods_item"\]:has/);
 });
 
-test('按钮位于卡片尾部，点击后展示全部且不再出现', () => {
+test('按钮位于商品列表尾部，点击后展示全部且不再出现', () => {
   class ClassList {
     constructor() {
       this.values = new Set();
@@ -78,12 +80,17 @@ test('按钮位于卡片尾部，点击后展示全部且不再出现', () => {
 
   const root = new Element('html');
   const list = new Element('div');
+  const grid = new Element('div');
   list.hasOutOfStock = true;
+  list.appendChild(grid);
   const observers = [];
   const document = {
     documentElement: root,
     createElement: (tagName) => new Element(tagName),
-    querySelectorAll: () => [list],
+    querySelectorAll: (selector) => {
+      assert.equal(selector, '.goods_content ._index .list');
+      return [list];
+    },
   };
 
   class MutationObserver {
@@ -102,7 +109,7 @@ test('按钮位于卡片尾部，点击后展示全部且不再出现', () => {
   assert.equal(button.type, 'button');
   assert.equal(button.textContent, '显示所有缺货商品');
 
-  list.appendChild(new Element('div'));
+  grid.appendChild(new Element('div'));
   observers[0].callback();
   assert.equal(list.lastElementChild, button);
 
