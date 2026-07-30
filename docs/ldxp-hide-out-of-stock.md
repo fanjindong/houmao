@@ -52,6 +52,7 @@ https://pay.ldxp.cn/shopApi/Shop/goodsList
 
    [item-selector=".goods_item"] > .goods_item {
      position: static !important;
+     transform: none !important;
    }
 
    html:not(.houmao-show-out-of-stock) .goods_item:has(.stock.rank0) {

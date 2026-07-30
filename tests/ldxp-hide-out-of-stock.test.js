@@ -15,10 +15,11 @@ test('真实页面的缺货与 Masonry 契约保持稳定', () => {
   assert.equal(page.match(/class="goods_item\b/g)?.length, 20);
   assert.equal(page.match(/class="stock rank0\b/g)?.length, 16);
   assert.equal(page.match(/item-selector="\.goods_item"/g)?.length, 1);
-  assert.match(script, /@version\s+0\.1\.1/);
+  assert.match(script, /@version\s+0\.1\.2/);
   assert.match(script, /html:not\(\.\$\{showAllClass\}\) \.goods_item:has\(\.stock\.rank0\)/);
   assert.match(script, /\[item-selector="\.goods_item"\] \{[\s\S]*display: flex !important/);
   assert.match(script, /position: static !important/);
+  assert.match(script, /transform: none !important/);
   assert.doesNotMatch(script, /\[item-selector="\.goods_item"\]:has/);
 });
 

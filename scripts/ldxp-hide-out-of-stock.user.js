@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LDxP 隐藏缺货商品
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.1.1
+// @version      0.1.2
 // @description  自动隐藏 pay.ldxp.cn 商铺中的缺货商品
 // @match        https://pay.ldxp.cn/shop/*
 // @run-at       document-start
@@ -25,6 +25,7 @@
     }
     [item-selector=".goods_item"] > .goods_item {
       position: static !important;
+      transform: none !important;
     }
     html:not(.${showAllClass}) .goods_item:has(.stock.rank0) {
       display: none !important;
