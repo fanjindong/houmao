@@ -14,6 +14,16 @@
 
 - **LDxP 隐藏缺货商品**：隐藏商铺中的缺货商品，并可一键显示全部缺货商品（[安装](https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/ldxp-hide-out-of-stock.user.js) · [源码](scripts/ldxp-hide-out-of-stock.user.js) · [说明](docs/ldxp-hide-out-of-stock.md)）。
 
+### LDxP 隐藏缺货商品效果
+
+打开商铺页面后，脚本会自动隐藏缺货商品，并在商品列表底部显示“显示所有缺货商品”按钮。
+
+![自动隐藏缺货商品](docs/images/ldxp-hide-out-of-stock-auto-hidden.png)
+
+点击“显示所有缺货商品”后，页面会展示全部缺货商品。
+
+![点击显示全部缺货商品](docs/images/ldxp-hide-out-of-stock-show-all.png)
+
 ## 测试
 
 ```sh
