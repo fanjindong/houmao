@@ -32,11 +32,11 @@ https://pay.ldxp.cn/shopApi/Shop/goodsList
 }
 ```
 
-- 商品卡片：`.goods_item`
+- 商品卡片：`.goods_item` 或 `.goods-group-item`
 - 缺货标记：商品卡片内的 `.stock.rank0`
 - 页面已根据 `stock_count <= 0` 生成 `rank0`，脚本直接使用此渲染结果
 
-下载页面中共有 20 张 `.goods_item` 卡片，其中 16 张带 `.stock.rank0`。页面各套已下载主题样式共用这两个类名。
+Masonry 页面共有 20 张 `.goods_item` 卡片，其中 16 张缺货；分组页面共有 2 张 `.goods-group-item` 卡片，均为缺货。
 
 ## 3. 功能要求
 
@@ -55,7 +55,7 @@ https://pay.ldxp.cn/shopApi/Shop/goodsList
      transform: none !important;
    }
 
-   html:not(.houmao-show-out-of-stock) .goods_item:has(.stock.rank0) {
+   html:not(.houmao-show-out-of-stock) :is(.goods_item, .goods-group-item):has(.stock.rank0) {
      display: none !important;
    }
    ```
@@ -139,7 +139,7 @@ https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/ldxp-hide-out-o
 4. 切换分类、搜索或加载下一页后，新商品仍按库存正确显示。
 5. 同一商品后续移除 `.stock.rank0` 时，商品重新可见。
 6. 非商铺页面及页面原有交互不受影响。
-7. 下载页面离线检查应匹配 20 张商品卡片中的 16 张缺货卡片。
+7. 两类下载页面离线检查应分别匹配 20 张卡片中的 16 张缺货卡片，以及 2 张卡片中的 2 张缺货卡片。
 8. 隐藏后剩余卡片须重新排列，不保留原绝对定位空洞。
 9. 商品容器尾部显示“显示所有缺货商品”按钮。
 10. 新卡片插入按钮之后时，按钮须自动移回末尾。

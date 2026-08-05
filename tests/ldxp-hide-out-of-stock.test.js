@@ -8,15 +8,19 @@ const repoRoot = path.resolve(__dirname, '..');
 const scriptPath = path.join(repoRoot, 'scripts/ldxp-hide-out-of-stock.user.js');
 const script = fs.readFileSync(scriptPath, 'utf8');
 const fixtureDir = path.join(__dirname, 'fixtures/ldxp-hide-out-of-stock');
-const pagePath = path.join(fixtureDir, fs.readdirSync(fixtureDir).find((name) => name.endsWith('.html')));
-const page = fs.readFileSync(pagePath, 'utf8');
+const pages = fs.readdirSync(fixtureDir)
+  .filter((name) => name.endsWith('.html'))
+  .map((name) => fs.readFileSync(path.join(fixtureDir, name), 'utf8'));
+const masonryPage = pages.find((page) => page.includes('class="goods_item'));
+const groupedPage = pages.find((page) => page.includes('class="goods-group-item'));
 
-test('真实页面的缺货与 Masonry 契约保持稳定', () => {
-  assert.equal(page.match(/class="goods_item\b/g)?.length, 20);
-  assert.equal(page.match(/class="stock rank0\b/g)?.length, 16);
-  assert.equal(page.match(/item-selector="\.goods_item"/g)?.length, 1);
-  assert.match(script, /@version\s+0\.1\.2/);
-  assert.match(script, /html:not\(\.\$\{showAllClass\}\) \.goods_item:has\(\.stock\.rank0\)/);
+test('两种真实页面的缺货契约保持稳定', () => {
+  assert.equal(masonryPage?.match(/class="goods_item\b/g)?.length, 20);
+  assert.equal(masonryPage?.match(/class="stock rank0\b/g)?.length, 16);
+  assert.equal(groupedPage?.match(/class="goods-group-item\b/g)?.length, 2);
+  assert.equal(groupedPage?.match(/class="stock rank0\b/g)?.length, 2);
+  assert.match(script, /@version\s+0\.1\.3/);
+  assert.match(script, /:is\(\.goods_item, \.goods-group-item\):has\(\.stock\.rank0\)/);
   assert.match(script, /\[item-selector="\.goods_item"\] \{[\s\S]*display: flex !important/);
   assert.match(script, /position: static !important/);
   assert.match(script, /transform: none !important/);
@@ -66,7 +70,7 @@ test('按钮位于商品列表尾部，点击后展示全部且不再出现', ()
     }
 
     querySelector(selector) {
-      if (selector === '.goods_item .stock.rank0') return this.hasOutOfStock ? {} : null;
+      if (selector === ':is(.goods_item, .goods-group-item) .stock.rank0') return this.hasOutOfStock ? {} : null;
       if (selector.startsWith(':scope > .')) {
         const className = selector.slice(':scope > .'.length);
         return this.children.find((child) => child.className === className) || null;
@@ -89,7 +93,7 @@ test('按钮位于商品列表尾部，点击后展示全部且不再出现', ()
     documentElement: root,
     createElement: (tagName) => new Element(tagName),
     querySelectorAll: (selector) => {
-      assert.equal(selector, '.goods_content ._index .list');
+      assert.equal(selector, '.goods_content ._index .list, .goods-group-content');
       return [list];
     },
   };
