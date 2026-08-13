@@ -13,14 +13,17 @@ const pages = fs.readdirSync(fixtureDir)
   .map((name) => fs.readFileSync(path.join(fixtureDir, name), 'utf8'));
 const masonryPage = pages.find((page) => page.includes('class="goods_item'));
 const groupedPage = pages.find((page) => page.includes('class="goods-group-item'));
+const listPage = pages.find((page) => page.includes('class="goods-item"'));
 
-test('两种真实页面的缺货契约保持稳定', () => {
+test('三种真实页面的缺货契约保持稳定', () => {
   assert.equal(masonryPage?.match(/class="goods_item\b/g)?.length, 20);
   assert.equal(masonryPage?.match(/class="stock rank0\b/g)?.length, 16);
   assert.equal(groupedPage?.match(/class="goods-group-item\b/g)?.length, 2);
   assert.equal(groupedPage?.match(/class="stock rank0\b/g)?.length, 2);
-  assert.match(script, /@version\s+0\.1\.3/);
-  assert.match(script, /:is\(\.goods_item, \.goods-group-item\):has\(\.stock\.rank0\)/);
+  assert.equal(listPage?.match(/class="goods-item\b/g)?.length, 56);
+  assert.equal(listPage?.match(/class="stock rank0\b/g)?.length, 44);
+  assert.match(script, /@version\s+0\.1\.4/);
+  assert.match(script, /:is\(\.goods_item, \.goods-group-item, \.goods-item\):has\(\.stock\.rank0\)/);
   assert.match(script, /\[item-selector="\.goods_item"\] \{[\s\S]*display: flex !important/);
   assert.match(script, /position: static !important/);
   assert.match(script, /transform: none !important/);
@@ -70,7 +73,7 @@ test('按钮位于商品列表尾部，点击后展示全部且不再出现', ()
     }
 
     querySelector(selector) {
-      if (selector === ':is(.goods_item, .goods-group-item) .stock.rank0') return this.hasOutOfStock ? {} : null;
+      if (selector === ':is(.goods_item, .goods-group-item, .goods-item) .stock.rank0') return this.hasOutOfStock ? {} : null;
       if (selector.startsWith(':scope > .')) {
         const className = selector.slice(':scope > .'.length);
         return this.children.find((child) => child.className === className) || null;
@@ -93,7 +96,7 @@ test('按钮位于商品列表尾部，点击后展示全部且不再出现', ()
     documentElement: root,
     createElement: (tagName) => new Element(tagName),
     querySelectorAll: (selector) => {
-      assert.equal(selector, '.goods_content ._index .list, .goods-group-content');
+      assert.equal(selector, '.goods_content ._index .list, .goods-group-content, .goods-list');
       return [list];
     },
   };

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LDxP 隐藏缺货商品
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.1.3
+// @version      0.1.4
 // @description  自动隐藏 pay.ldxp.cn 商铺中的缺货商品
 // @match        https://pay.ldxp.cn/shop/*
 // @run-at       document-start
@@ -15,7 +15,7 @@
 
   const showAllClass = 'houmao-show-out-of-stock';
   const buttonClass = 'houmao-show-out-of-stock-button';
-  const listSelector = '.goods_content ._index .list, .goods-group-content';
+  const listSelector = '.goods_content ._index .list, .goods-group-content, .goods-list';
   const style = document.createElement('style');
   style.textContent = `
     [item-selector=".goods_item"] {
@@ -27,7 +27,7 @@
       position: static !important;
       transform: none !important;
     }
-    html:not(.${showAllClass}) :is(.goods_item, .goods-group-item):has(.stock.rank0) {
+    html:not(.${showAllClass}) :is(.goods_item, .goods-group-item, .goods-item):has(.stock.rank0) {
       display: none !important;
     }
     .${buttonClass} {
@@ -61,7 +61,7 @@
 
     for (const list of document.querySelectorAll(listSelector)) {
       let button = list.querySelector(`:scope > .${buttonClass}`);
-      const needsButton = !showingAll && list.querySelector(':is(.goods_item, .goods-group-item) .stock.rank0');
+      const needsButton = !showingAll && list.querySelector(':is(.goods_item, .goods-group-item, .goods-item) .stock.rank0');
 
       if (!needsButton) {
         button?.remove();
