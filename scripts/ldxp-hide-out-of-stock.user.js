@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         卡网库存助手
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.2.1
+// @version      0.2.2
 // @description  显示 pay.ldxp.cn 商铺百件以下的准确库存并自动隐藏缺货商品
+// @icon         https://raw.githubusercontent.com/fanjindong/houmao/main/docs/images/card-stock-assistant.png
 // @match        https://pay.ldxp.cn/shop/*
 // @run-at       document-start
 // @grant        none

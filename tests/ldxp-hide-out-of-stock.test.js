@@ -22,7 +22,8 @@ test('三种真实页面的缺货契约保持稳定', () => {
   assert.equal(groupedPage?.match(/class="stock rank0\b/g)?.length, 2);
   assert.equal(listPage?.match(/class="goods-item\b/g)?.length, 56);
   assert.equal(listPage?.match(/class="stock rank0\b/g)?.length, 44);
-  assert.match(script, /@version\s+0\.2\.0/);
+  assert.match(script, /@version\s+0\.2\.2/);
+  assert.match(script, /@icon\s+https:\/\/raw\.githubusercontent\.com\/fanjindong\/houmao\/main\/docs\/images\/card-stock-assistant\.png/);
   assert.match(script, /:is\(\.goods_item, \.goods-group-item, \.goods-item\):has\(\.stock\.rank0\)/);
   assert.match(script, /\[item-selector="\.goods_item"\] \{[\s\S]*display: flex !important/);
   assert.match(script, /position: static !important/);

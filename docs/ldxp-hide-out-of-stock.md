@@ -88,6 +88,7 @@ Masonry 页面共有 20 张 `.goods_item` 卡片，其中 16 张缺货；分组�
 // @namespace    https://github.com/fanjindong/houmao
 // @version      0.1.0
 // @description  自动隐藏 pay.ldxp.cn 商铺中的缺货商品
+// @icon         https://raw.githubusercontent.com/fanjindong/houmao/main/docs/images/card-stock-assistant.png
 // @match        https://pay.ldxp.cn/shop/*
 // @run-at       document-start
 // @grant        none
