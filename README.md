@@ -12,9 +12,9 @@
 
 ## 脚本
 
-- **LDxP 隐藏缺货商品**：显示百件以下的准确库存、隐藏缺货商品，并可一键显示全部缺货商品（[安装](https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/ldxp-hide-out-of-stock.user.js) · [源码](scripts/ldxp-hide-out-of-stock.user.js) · [说明](docs/ldxp-hide-out-of-stock.md)）。
+- **卡网库存助手**：显示百件以下的准确库存、隐藏缺货商品，并可一键显示全部缺货商品（[安装](https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/ldxp-hide-out-of-stock.user.js) · [源码](scripts/ldxp-hide-out-of-stock.user.js) · [说明](docs/ldxp-hide-out-of-stock.md)）。
 
-### LDxP 隐藏缺货商品效果
+### 卡网库存助手效果
 
 打开商铺页面后，脚本会自动隐藏缺货商品，并在商品列表底部显示“显示所有缺货商品”按钮。
 

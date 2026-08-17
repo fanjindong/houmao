@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         LDxP 隐藏缺货商品
+// @name         卡网库存助手
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.2.0
+// @version      0.2.1
 // @description  显示 pay.ldxp.cn 商铺百件以下的准确库存并自动隐藏缺货商品
 // @match        https://pay.ldxp.cn/shop/*
 // @run-at       document-start
