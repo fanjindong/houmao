@@ -22,7 +22,7 @@ test('三种真实页面的缺货契约保持稳定', () => {
   assert.equal(groupedPage?.match(/class="stock rank0\b/g)?.length, 2);
   assert.equal(listPage?.match(/class="goods-item\b/g)?.length, 56);
   assert.equal(listPage?.match(/class="stock rank0\b/g)?.length, 44);
-  assert.match(script, /@version\s+0\.1\.4/);
+  assert.match(script, /@version\s+0\.2\.0/);
   assert.match(script, /:is\(\.goods_item, \.goods-group-item, \.goods-item\):has\(\.stock\.rank0\)/);
   assert.match(script, /\[item-selector="\.goods_item"\] \{[\s\S]*display: flex !important/);
   assert.match(script, /position: static !important/);
@@ -110,7 +110,37 @@ test('按钮位于商品列表尾部，点击后展示全部且不再出现', ()
     observe() {}
   }
 
-  vm.runInNewContext(script, { document, MutationObserver });
+  class XMLHttpRequest {
+    static DONE = 4;
+
+    constructor() {
+      this.listeners = {};
+      this.readyState = 0;
+      this.responseType = '';
+    }
+
+    addEventListener(type, listener) {
+      (this.listeners[type] ||= []).push(listener);
+    }
+
+    open(method, url) {
+      this.method = method;
+      this.url = url;
+    }
+
+    respond(response) {
+      this.readyState = XMLHttpRequest.DONE;
+      this.responseText = JSON.stringify(response);
+      for (const listener of this.listeners.readystatechange || []) listener();
+    }
+  }
+
+  vm.runInNewContext(script, { document, MutationObserver, XMLHttpRequest });
+
+  const request = new XMLHttpRequest();
+  request.open('POST', '/shopApi/Shop/goodsList');
+  request.respond({ data: { list: [0, 15, 99, 100].map((stock_count) => ({ extend: { show_stock_type: 0, stock_count } })) } });
+  assert.deepEqual(JSON.parse(request.responseText).data.list.map((goods) => goods.extend.show_stock_type), [0, 1, 1, 0]);
 
   const button = list.lastElementChild;
   assert.equal(button.tagName, 'button');

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LDxP 隐藏缺货商品
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.1.4
-// @description  自动隐藏 pay.ldxp.cn 商铺中的缺货商品
+// @version      0.2.0
+// @description  显示 pay.ldxp.cn 商铺百件以下的准确库存并自动隐藏缺货商品
 // @match        https://pay.ldxp.cn/shop/*
 // @run-at       document-start
 // @grant        none
@@ -16,6 +16,31 @@
   const showAllClass = 'houmao-show-out-of-stock';
   const buttonClass = 'houmao-show-out-of-stock-button';
   const listSelector = '.goods_content ._index .list, .goods-group-content, .goods-list';
+  const originalOpen = XMLHttpRequest.prototype.open;
+
+  XMLHttpRequest.prototype.open = function (...args) {
+    const result = originalOpen.apply(this, args);
+
+    if (String(args[1]).includes('/shopApi/Shop/goodsList')) {
+      this.addEventListener('readystatechange', () => {
+        if (this.readyState !== XMLHttpRequest.DONE) return;
+
+        try {
+          const response = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
+          for (const goods of response?.data?.list || []) {
+            const stockCount = goods.extend?.stock_count;
+            if (stockCount > 0 && stockCount < 100) goods.extend.show_stock_type = 1;
+          }
+          if (this.responseType !== 'json') {
+            Object.defineProperty(this, 'responseText', { value: JSON.stringify(response) });
+          }
+        } catch {}
+      }, true);
+    }
+
+    return result;
+  };
+
   const style = document.createElement('style');
   style.textContent = `
     [item-selector=".goods_item"] {
