@@ -7,18 +7,24 @@ const fs = require('node:fs');
 const scriptPath = path.resolve(__dirname, '../scripts/linux-do-topic-filter.user.js');
 
 test('过滤词按行清理、去重并作标题子串匹配', () => {
-  const { parseKeywords, matchingKeywords } = require(scriptPath);
+  const { parseKeywords, matchingKeywords, matchingExactKeywords } = require(scriptPath);
 
   assert.deepEqual(parseKeywords(' AI \n\n抽奖\nai\nAI 助手 '), ['AI', '抽奖', 'AI 助手']);
   assert.deepEqual(parseKeywords(null), []);
   assert.deepEqual(matchingKeywords('OpenAI 抽奖活动', ['ai', '抽奖', '教程']), ['ai', '抽奖']);
   assert.deepEqual(matchingKeywords('', ['抽奖']), []);
+  assert.deepEqual(
+    matchingExactKeywords(['人工智能', '开发调优'], ['人工智能', '人工', '开发']),
+    ['人工智能'],
+  );
 });
 
-test('草稿只更新预览，保存后过滤当前及新增帖子，清空后恢复', async () => {
+test('标题、标签和类别独立过滤，草稿预览后保存并处理新增帖子', async () => {
   const script = fs.readFileSync(scriptPath, 'utf8');
   const rowSelector = '.topic-list-item[data-topic-id]';
   const titleSelector = '.title.raw-topic-link[data-topic-id]';
+  const tagSelector = '.discourse-tag';
+  const categorySelector = '.badge-category__name';
   const hiddenClass = 'houmao-linux-do-topic-filter-hidden';
 
   class ClassList {
@@ -83,7 +89,9 @@ test('草稿只更新预览，保存后过滤当前及新增帖子，清空后�
     constructor() {
       super('dialog');
       this.controls = {
-        '.houmao-linux-do-topic-filter-input': new Element('textarea'),
+        '.houmao-linux-do-topic-filter-title-input': new Element('textarea'),
+        '.houmao-linux-do-topic-filter-tag-input': new Element('textarea'),
+        '.houmao-linux-do-topic-filter-category-input': new Element('textarea'),
         '.houmao-linux-do-topic-filter-status': new Element('p'),
         '.houmao-linux-do-topic-filter-preview': new Element('ul'),
         '.houmao-linux-do-topic-filter-error': new Element('p'),
@@ -97,23 +105,31 @@ test('草稿只更新预览，保存后过滤当前及新增帖子，清空后�
     }
   }
 
-  const topic = (title) => {
+  const topic = ({ title, tags = [], category = null }) => {
     const classList = new ClassList();
     const anchor = title === null ? null : { textContent: title, href: `https://linux.do/t/${encodeURIComponent(title)}` };
+    const tagElements = tags.map((textContent) => ({ textContent }));
+    const categoryElements = category === null ? [] : [{ textContent: category }];
     const row = {
       nodeType: 1,
       classList,
       closest: (selector) => selector === rowSelector ? row : null,
       querySelector: (selector) => selector === titleSelector ? anchor : null,
-      querySelectorAll: () => [],
+      querySelectorAll: (selector) => {
+        if (selector === tagSelector) return tagElements;
+        if (selector === categorySelector) return categoryElements;
+        return [];
+      },
     };
     return row;
   };
 
-  const alpha = topic('Alpha 发布说明');
-  const beta = topic('Beta 使用指南');
-  const untitled = topic(null);
-  const topics = [alpha, beta, untitled];
+  const alpha = topic({ title: 'Alpha 发布说明', tags: ['人工智能'], category: '开发调优' });
+  const tagged = topic({ title: 'Beta 使用指南', tags: ['人工智能'] });
+  const categorized = topic({ title: 'Gamma 调优记录', category: '开发调优' });
+  const partial = topic({ title: 'Delta', tags: ['人工智能工具'], category: '开发调优区' });
+  const untitled = topic({ title: null });
+  const topics = [alpha, tagged, categorized, partial, untitled];
   const body = new Element('body');
   const documentElement = new Element('html');
   const document = {
@@ -136,16 +152,20 @@ test('草稿只更新预览，保存后过滤当前及新增帖子，清空后�
     observe() {}
   }
 
-  let stored = 'alpha\nALPHA';
+  const stored = new Map([
+    ['keywords', 'alpha\nALPHA'],
+    ['tagKeywords', '人工智能'],
+    ['categoryKeywords', '开发调优'],
+  ]);
   let menuCommand;
   const saved = [];
   const context = {
     document,
     MutationObserver,
-    GM_getValue: () => stored,
-    GM_setValue: (_key, value) => {
-      stored = value;
-      saved.push(value);
+    GM_getValue: (key, fallback) => stored.get(key) ?? fallback,
+    GM_setValue: (key, value) => {
+      stored.set(key, value);
+      saved.push([key, value]);
     },
     GM_registerMenuCommand: (_label, callback) => {
       menuCommand = callback;
@@ -155,29 +175,42 @@ test('草稿只更新预览，保存后过滤当前及新增帖子，清空后�
   vm.runInNewContext(script, context);
 
   assert.equal(alpha.classList.contains(hiddenClass), true);
-  assert.equal(beta.classList.contains(hiddenClass), false);
+  assert.equal(tagged.classList.contains(hiddenClass), true);
+  assert.equal(categorized.classList.contains(hiddenClass), true);
+  assert.equal(partial.classList.contains(hiddenClass), false);
   assert.equal(untitled.classList.contains(hiddenClass), false);
 
   menuCommand();
   const dialog = body.children.find((child) => child.tagName === 'dialog');
-  const input = dialog.querySelector('.houmao-linux-do-topic-filter-input');
+  const titleInput = dialog.querySelector('.houmao-linux-do-topic-filter-title-input');
+  const tagInput = dialog.querySelector('.houmao-linux-do-topic-filter-tag-input');
+  const categoryInput = dialog.querySelector('.houmao-linux-do-topic-filter-category-input');
   const status = dialog.querySelector('.houmao-linux-do-topic-filter-status');
   const preview = dialog.querySelector('.houmao-linux-do-topic-filter-preview');
   const save = dialog.querySelector('.houmao-linux-do-topic-filter-save');
-  assert.equal(input.value, 'alpha');
-  assert.equal(status.textContent, '当前页面将过滤 1 个帖子');
+  assert.equal(titleInput.value, 'alpha');
+  assert.equal(tagInput.value, '人工智能');
+  assert.equal(categoryInput.value, '开发调优');
+  assert.equal(status.textContent, '当前页面将过滤 3 个帖子');
   assert.equal(preview.children[0].children[0].textContent, 'Alpha 发布说明');
-  assert.equal(preview.children[0].children[1].textContent, '命中：alpha');
+  assert.equal(
+    preview.children[0].children[1].textContent,
+    '标题：alpha；标签：人工智能；类别：开发调优',
+  );
+  assert.equal(preview.children[1].children[1].textContent, '标签：人工智能');
+  assert.equal(preview.children[2].children[1].textContent, '类别：开发调优');
 
-  input.value = 'beta';
-  await input.dispatch('input');
+  titleInput.value = 'beta';
+  tagInput.value = '';
+  categoryInput.value = '';
+  await titleInput.dispatch('input');
   assert.equal(status.textContent, '当前页面将过滤 1 个帖子');
   assert.equal(preview.children[0].children[0].textContent, 'Beta 使用指南');
-  assert.equal(preview.children[0].children[1].textContent, '命中：beta');
+  assert.equal(preview.children[0].children[1].textContent, '标题：beta');
   assert.equal(alpha.classList.contains(hiddenClass), true);
-  assert.equal(beta.classList.contains(hiddenClass), false);
+  assert.equal(tagged.classList.contains(hiddenClass), true);
 
-  const newBeta = topic('另一个 Beta 帖子');
+  const newBeta = topic({ title: '另一个 Beta 帖子' });
   topics.push(newBeta);
   observeCallback([{ addedNodes: [newBeta] }]);
   assert.equal(status.textContent, '当前页面将过滤 2 个帖子');
@@ -186,25 +219,43 @@ test('草稿只更新预览，保存后过滤当前及新增帖子，清空后�
   dialog.close();
   assert.deepEqual(saved, []);
   menuCommand();
-  assert.equal(input.value, 'alpha');
+  assert.equal(titleInput.value, 'alpha');
+  assert.equal(tagInput.value, '人工智能');
+  assert.equal(categoryInput.value, '开发调优');
 
-  input.value = 'beta';
+  titleInput.value = 'beta';
+  tagInput.value = '站务';
+  categoryInput.value = '搞七捻三';
   await save.dispatch('click');
-  assert.deepEqual(saved, ['beta']);
+  assert.deepEqual(saved, [
+    ['keywords', 'beta'],
+    ['tagKeywords', '站务'],
+    ['categoryKeywords', '搞七捻三'],
+  ]);
   assert.equal(alpha.classList.contains(hiddenClass), false);
-  assert.equal(beta.classList.contains(hiddenClass), true);
+  assert.equal(tagged.classList.contains(hiddenClass), true);
+  assert.equal(categorized.classList.contains(hiddenClass), false);
   assert.equal(newBeta.classList.contains(hiddenClass), true);
 
-  const laterBeta = topic('稍后加载的 Beta 帖子');
-  topics.push(laterBeta);
-  observeCallback([{ addedNodes: [laterBeta] }]);
-  assert.equal(laterBeta.classList.contains(hiddenClass), true);
+  const laterTag = topic({ title: '站点公告', tags: ['站务'] });
+  const laterCategory = topic({ title: '闲聊', category: '搞七捻三' });
+  const similarTag = topic({ title: '近似标签', tags: ['站务公告'] });
+  topics.push(laterTag, laterCategory, similarTag);
+  observeCallback([{ addedNodes: [laterTag, laterCategory, similarTag] }]);
+  assert.equal(laterTag.classList.contains(hiddenClass), true);
+  assert.equal(laterCategory.classList.contains(hiddenClass), true);
+  assert.equal(similarTag.classList.contains(hiddenClass), false);
 
   menuCommand();
-  input.value = '';
+  titleInput.value = '';
+  tagInput.value = '';
+  categoryInput.value = '';
   await save.dispatch('click');
-  assert.equal(stored, '');
-  assert.equal(beta.classList.contains(hiddenClass), false);
+  assert.equal(stored.get('keywords'), '');
+  assert.equal(stored.get('tagKeywords'), '');
+  assert.equal(stored.get('categoryKeywords'), '');
+  assert.equal(tagged.classList.contains(hiddenClass), false);
   assert.equal(newBeta.classList.contains(hiddenClass), false);
-  assert.equal(laterBeta.classList.contains(hiddenClass), false);
+  assert.equal(laterTag.classList.contains(hiddenClass), false);
+  assert.equal(laterCategory.classList.contains(hiddenClass), false);
 });

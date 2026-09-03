@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.1.0
-// @description  按标题关键字过滤 linux.do 帖子，并在应用前预览
+// @version      0.2.0
+// @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
 // @grant        GM_getValue
@@ -33,17 +33,32 @@
     return keywords.filter((keyword) => normalizedTitle.includes(keyword.toLowerCase()));
   };
 
+  const matchingExactKeywords = (values, keywords) => {
+    const normalizedValues = new Set(values.map((value) => value.toLowerCase()));
+    return keywords.filter((keyword) => normalizedValues.has(keyword.toLowerCase()));
+  };
+
   if (typeof module === 'object' && module.exports) {
-    module.exports = { parseKeywords, matchingKeywords };
+    module.exports = { parseKeywords, matchingKeywords, matchingExactKeywords };
   }
   if (typeof document === 'undefined') return;
 
-  const storageKey = 'keywords';
+  const storageKeys = {
+    title: 'keywords',
+    tag: 'tagKeywords',
+    category: 'categoryKeywords',
+  };
   const prefix = 'houmao-linux-do-topic-filter';
   const hiddenClass = `${prefix}-hidden`;
   const rowSelector = '.topic-list-item[data-topic-id]';
   const titleSelector = '.title.raw-topic-link[data-topic-id]';
-  let keywords = parseKeywords(GM_getValue(storageKey, ''));
+  const tagSelector = '.discourse-tag';
+  const categorySelector = '.badge-category__name';
+  let filters = {
+    title: parseKeywords(GM_getValue(storageKeys.title, '')),
+    tag: parseKeywords(GM_getValue(storageKeys.tag, '')),
+    category: parseKeywords(GM_getValue(storageKeys.category, '')),
+  };
   let dialog;
 
   const style = document.createElement('style');
@@ -100,10 +115,13 @@
       margin-bottom: 6px;
       font-weight: 600;
     }
+    .${prefix}-input + .${prefix}-label {
+      margin-top: 12px;
+    }
     .${prefix}-input {
       box-sizing: border-box;
       width: 100%;
-      min-height: 136px;
+      min-height: 88px;
       padding: 10px 12px;
       color: inherit;
       font: inherit;
@@ -199,14 +217,25 @@
   `;
   document.documentElement.append(style);
 
-  const topicDetails = (row, words) => {
+  const textValues = (row, selector) => Array.from(
+    row.querySelectorAll(selector),
+    (element) => element.textContent?.trim() || '',
+  ).filter(Boolean);
+
+  const topicDetails = (row, rules) => {
     const link = row.querySelector(titleSelector);
     const title = link?.textContent?.trim() || '';
-    return { link, title, matches: matchingKeywords(title, words) };
+    if (!link || !title) return { link, title, matches: [] };
+    const matches = [
+      { label: '标题', keywords: matchingKeywords(title, rules.title) },
+      { label: '标签', keywords: matchingExactKeywords(textValues(row, tagSelector), rules.tag) },
+      { label: '类别', keywords: matchingExactKeywords(textValues(row, categorySelector), rules.category) },
+    ].filter((match) => match.keywords.length);
+    return { link, title, matches };
   };
 
   const filterRow = (row) => {
-    const { matches } = topicDetails(row, keywords);
+    const { matches } = topicDetails(row, filters);
     row.classList.toggle(hiddenClass, matches.length > 0);
   };
 
@@ -215,10 +244,16 @@
   };
 
   const renderPreview = () => {
-    const input = dialog.querySelector(`.${prefix}-input`);
+    const titleInput = dialog.querySelector(`.${prefix}-title-input`);
+    const tagInput = dialog.querySelector(`.${prefix}-tag-input`);
+    const categoryInput = dialog.querySelector(`.${prefix}-category-input`);
     const status = dialog.querySelector(`.${prefix}-status`);
     const preview = dialog.querySelector(`.${prefix}-preview`);
-    const draft = parseKeywords(input.value);
+    const draft = {
+      title: parseKeywords(titleInput.value),
+      tag: parseKeywords(tagInput.value),
+      category: parseKeywords(categoryInput.value),
+    };
     const matchedTopics = [];
 
     for (const row of document.querySelectorAll(rowSelector)) {
@@ -237,7 +272,9 @@
       link.rel = 'noopener noreferrer';
       link.textContent = title;
       match.className = `${prefix}-match`;
-      match.textContent = `命中：${matches.join('、')}`;
+      match.textContent = matches
+        .map(({ label, keywords: matchedKeywords }) => `${label}：${matchedKeywords.join('、')}`)
+        .join('；');
       item.append(link, match);
       fragment.append(item);
     }
@@ -254,8 +291,12 @@
           <button type="submit" value="cancel" class="${prefix}-close" aria-label="关闭" title="关闭">×</button>
         </header>
         <div class="${prefix}-body">
-          <label class="${prefix}-label" for="${prefix}-input">过滤词（每行一个）</label>
-          <textarea id="${prefix}-input" class="${prefix}-input"></textarea>
+          <label class="${prefix}-label" for="${prefix}-title-input">标题过滤词（每行一个）</label>
+          <textarea id="${prefix}-title-input" class="${prefix}-input ${prefix}-title-input"></textarea>
+          <label class="${prefix}-label" for="${prefix}-tag-input">标签名称（每行一个）</label>
+          <textarea id="${prefix}-tag-input" class="${prefix}-input ${prefix}-tag-input"></textarea>
+          <label class="${prefix}-label" for="${prefix}-category-input">类别名称（每行一个）</label>
+          <textarea id="${prefix}-category-input" class="${prefix}-input ${prefix}-category-input"></textarea>
           <p class="${prefix}-status" aria-live="polite"></p>
           <p class="${prefix}-error" role="alert" hidden></p>
           <ul class="${prefix}-preview" aria-label="将被过滤的帖子"></ul>
@@ -267,15 +308,27 @@
       </form>
     `;
 
-    const input = element.querySelector(`.${prefix}-input`);
+    const titleInput = element.querySelector(`.${prefix}-title-input`);
+    const tagInput = element.querySelector(`.${prefix}-tag-input`);
+    const categoryInput = element.querySelector(`.${prefix}-category-input`);
     const error = element.querySelector(`.${prefix}-error`);
     const save = element.querySelector(`.${prefix}-save`);
-    input.addEventListener('input', renderPreview);
+    for (const input of [titleInput, tagInput, categoryInput]) {
+      input.addEventListener('input', renderPreview);
+    }
     save.addEventListener('click', async () => {
-      const nextKeywords = parseKeywords(input.value);
+      const nextFilters = {
+        title: parseKeywords(titleInput.value),
+        tag: parseKeywords(tagInput.value),
+        category: parseKeywords(categoryInput.value),
+      };
       try {
-        await GM_setValue(storageKey, nextKeywords.join('\n'));
-        keywords = nextKeywords;
+        await Promise.all([
+          GM_setValue(storageKeys.title, nextFilters.title.join('\n')),
+          GM_setValue(storageKeys.tag, nextFilters.tag.join('\n')),
+          GM_setValue(storageKeys.category, nextFilters.category.join('\n')),
+        ]);
+        filters = nextFilters;
         filterAll();
         element.close();
       } catch {
@@ -290,14 +343,18 @@
 
   const openSettings = () => {
     dialog ||= createDialog();
-    const input = dialog.querySelector(`.${prefix}-input`);
+    const titleInput = dialog.querySelector(`.${prefix}-title-input`);
+    const tagInput = dialog.querySelector(`.${prefix}-tag-input`);
+    const categoryInput = dialog.querySelector(`.${prefix}-category-input`);
     const error = dialog.querySelector(`.${prefix}-error`);
-    input.value = keywords.join('\n');
+    titleInput.value = filters.title.join('\n');
+    tagInput.value = filters.tag.join('\n');
+    categoryInput.value = filters.category.join('\n');
     error.hidden = true;
     error.textContent = '';
     renderPreview();
     if (!dialog.open) dialog.showModal();
-    input.focus();
+    titleInput.focus();
   };
 
   const observer = new MutationObserver((records) => {
