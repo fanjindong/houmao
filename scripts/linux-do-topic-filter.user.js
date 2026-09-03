@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.2.0
+// @version      0.2.1
 // @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -36,6 +36,16 @@
   const matchingExactKeywords = (values, keywords) => {
     const normalizedValues = new Set(values.map((value) => value.toLowerCase()));
     return keywords.filter((keyword) => normalizedValues.has(keyword.toLowerCase()));
+  };
+
+  const matchingCategoryKeywords = (values, keywords) => {
+    const normalizedValues = values.map((value) => value.toLowerCase());
+    return keywords.filter((keyword) => {
+      const normalizedKeyword = keyword.toLowerCase();
+      return normalizedValues.some(
+        (value) => value === normalizedKeyword || value.startsWith(`${normalizedKeyword},`),
+      );
+    });
   };
 
   if (typeof module === 'object' && module.exports) {
@@ -229,7 +239,7 @@
     const matches = [
       { label: '标题', keywords: matchingKeywords(title, rules.title) },
       { label: '标签', keywords: matchingExactKeywords(textValues(row, tagSelector), rules.tag) },
-      { label: '类别', keywords: matchingExactKeywords(textValues(row, categorySelector), rules.category) },
+      { label: '类别', keywords: matchingCategoryKeywords(textValues(row, categorySelector), rules.category) },
     ].filter((match) => match.keywords.length);
     return { link, title, matches };
   };

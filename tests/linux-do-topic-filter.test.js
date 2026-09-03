@@ -126,7 +126,7 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
 
   const alpha = topic({ title: 'Alpha 发布说明', tags: ['人工智能'], category: '开发调优' });
   const tagged = topic({ title: 'Beta 使用指南', tags: ['人工智能'] });
-  const categorized = topic({ title: 'Gamma 调优记录', category: '开发调优' });
+  const categorized = topic({ title: 'Gamma 调优记录', category: '开发调优, Lv1' });
   const partial = topic({ title: 'Delta', tags: ['人工智能工具'], category: '开发调优区' });
   const untitled = topic({ title: null });
   const topics = [alpha, tagged, categorized, partial, untitled];
