@@ -13,6 +13,7 @@
 ## 脚本
 
 - **卡网库存助手**：显示百件以下的准确库存、隐藏缺货商品，并可一键显示全部缺货商品（[安装](https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/ldxp-hide-out-of-stock.user.js) · [源码](scripts/ldxp-hide-out-of-stock.user.js) · [说明](docs/ldxp-hide-out-of-stock.md)）。
+- **LINUX DO 帖子过滤器**：按标题关键字隐藏帖子，并可在保存设置前预览过滤结果（[安装](https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/linux-do-topic-filter.user.js) · [源码](scripts/linux-do-topic-filter.user.js) · [说明](docs/linux-do-topic-filter.md)）。
 
 ### 卡网库存助手效果
 
