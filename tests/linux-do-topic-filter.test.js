@@ -182,6 +182,7 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
 
   menuCommand();
   const dialog = body.children.find((child) => child.tagName === 'dialog');
+  assert.ok(dialog.innerHTML.indexOf('类别名称') < dialog.innerHTML.indexOf('标签名称'));
   const titleInput = dialog.querySelector('.houmao-linux-do-topic-filter-title-input');
   const tagInput = dialog.querySelector('.houmao-linux-do-topic-filter-tag-input');
   const categoryInput = dialog.querySelector('.houmao-linux-do-topic-filter-category-input');

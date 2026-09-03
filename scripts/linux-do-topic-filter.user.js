@@ -293,10 +293,10 @@
         <div class="${prefix}-body">
           <label class="${prefix}-label" for="${prefix}-title-input">标题过滤词（每行一个）</label>
           <textarea id="${prefix}-title-input" class="${prefix}-input ${prefix}-title-input"></textarea>
-          <label class="${prefix}-label" for="${prefix}-tag-input">标签名称（每行一个）</label>
-          <textarea id="${prefix}-tag-input" class="${prefix}-input ${prefix}-tag-input"></textarea>
           <label class="${prefix}-label" for="${prefix}-category-input">类别名称（每行一个）</label>
           <textarea id="${prefix}-category-input" class="${prefix}-input ${prefix}-category-input"></textarea>
+          <label class="${prefix}-label" for="${prefix}-tag-input">标签名称（每行一个）</label>
+          <textarea id="${prefix}-tag-input" class="${prefix}-input ${prefix}-tag-input"></textarea>
           <p class="${prefix}-status" aria-live="polite"></p>
           <p class="${prefix}-error" role="alert" hidden></p>
           <ul class="${prefix}-preview" aria-label="将被过滤的帖子"></ul>
