@@ -25,7 +25,9 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   const titleSelector = '.title.raw-topic-link[data-topic-id]';
   const tagSelector = '.discourse-tag';
   const categorySelector = '.badge-category__name';
+  const activeClass = 'houmao-linux-do-topic-filter-active';
   const hiddenClass = 'houmao-linux-do-topic-filter-hidden';
+  const readyClass = 'houmao-linux-do-topic-filter-ready';
 
   class ClassList {
     constructor() {
@@ -45,6 +47,7 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   class Element {
     constructor(tagName) {
       this.tagName = tagName;
+      this.classList = new ClassList();
       this.children = [];
       this.listeners = {};
       this.hidden = false;
@@ -174,7 +177,15 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
 
   vm.runInNewContext(script, context);
 
+  assert.equal(documentElement.classList.contains(activeClass), true);
+  assert.equal(
+    documentElement.children[0].textContent.includes(
+      `.${activeClass} ${rowSelector}:not(.${readyClass})`,
+    ),
+    true,
+  );
   assert.equal(alpha.classList.contains(hiddenClass), true);
+  assert.equal(alpha.classList.contains(readyClass), true);
   assert.equal(tagged.classList.contains(hiddenClass), true);
   assert.equal(categorized.classList.contains(hiddenClass), true);
   assert.equal(partial.classList.contains(hiddenClass), false);
@@ -213,7 +224,9 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
 
   const newBeta = topic({ title: '另一个 Beta 帖子' });
   topics.push(newBeta);
+  assert.equal(newBeta.classList.contains(readyClass), false);
   observeCallback([{ addedNodes: [newBeta] }]);
+  assert.equal(newBeta.classList.contains(readyClass), true);
   assert.equal(status.textContent, '当前页面将过滤 2 个帖子');
   assert.equal(newBeta.classList.contains(hiddenClass), false);
 
@@ -252,6 +265,7 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   tagInput.value = '';
   categoryInput.value = '';
   await save.dispatch('click');
+  assert.equal(documentElement.classList.contains(activeClass), false);
   assert.equal(stored.get('keywords'), '');
   assert.equal(stored.get('tagKeywords'), '');
   assert.equal(stored.get('categoryKeywords'), '');

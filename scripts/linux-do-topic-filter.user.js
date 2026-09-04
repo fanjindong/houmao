@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.2.1
+// @version      0.2.2
 // @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -59,7 +59,9 @@
     category: 'categoryKeywords',
   };
   const prefix = 'houmao-linux-do-topic-filter';
+  const activeClass = `${prefix}-active`;
   const hiddenClass = `${prefix}-hidden`;
+  const readyClass = `${prefix}-ready`;
   const rowSelector = '.topic-list-item[data-topic-id]';
   const titleSelector = '.title.raw-topic-link[data-topic-id]';
   const tagSelector = '.discourse-tag';
@@ -71,8 +73,18 @@
   };
   let dialog;
 
+  const syncActiveState = () => {
+    document.documentElement.classList.toggle(
+      activeClass,
+      Object.values(filters).some((keywords) => keywords.length),
+    );
+  };
+
   const style = document.createElement('style');
   style.textContent = `
+    .${activeClass} ${rowSelector}:not(.${readyClass}) {
+      display: none !important;
+    }
     .${hiddenClass} {
       display: none !important;
     }
@@ -226,6 +238,7 @@
     }
   `;
   document.documentElement.append(style);
+  syncActiveState();
 
   const textValues = (row, selector) => Array.from(
     row.querySelectorAll(selector),
@@ -247,6 +260,7 @@
   const filterRow = (row) => {
     const { matches } = topicDetails(row, filters);
     row.classList.toggle(hiddenClass, matches.length > 0);
+    row.classList.toggle(readyClass, true);
   };
 
   const filterAll = () => {
@@ -339,6 +353,7 @@
           GM_setValue(storageKeys.category, nextFilters.category.join('\n')),
         ]);
         filters = nextFilters;
+        syncActiveState();
         filterAll();
         element.close();
       } catch {
