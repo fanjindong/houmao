@@ -203,7 +203,7 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   assert.equal(documentElement.classList.contains(activeClass), true);
   assert.equal(
     documentElement.children[0].textContent.includes(
-      `.${activeClass} ${rowSelector}:not(.${readyClass})`,
+      `.${activeClass} ${rowSelector}:not(.${readyClass}) {\n      visibility: hidden !important;`,
     ),
     true,
   );

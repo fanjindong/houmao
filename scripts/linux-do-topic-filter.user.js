@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.2.3
+// @version      0.2.4
 // @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -85,7 +85,7 @@
   const style = document.createElement('style');
   style.textContent = `
     .${activeClass} ${rowSelector}:not(.${readyClass}) {
-      display: none !important;
+      visibility: hidden !important;
     }
     .${hiddenClass} {
       display: none !important;
