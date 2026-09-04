@@ -1,53 +1,106 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
-const fs = require('node:fs');
 
 const scriptPath = path.resolve(__dirname, '../scripts/linux-do-topic-filter.user.js');
 
-test('过滤词按行清理、去重并作标题子串匹配', () => {
-  const { parseKeywords, matchingKeywords, matchingExactKeywords } = require(scriptPath);
+test('过滤词按行清理，并按标题、标签和类别的既定规则匹配', () => {
+  const {
+    matchingCategoryKeywords,
+    matchingExactKeywords,
+    matchingKeywords,
+    parseKeywords,
+  } = require(scriptPath);
 
   assert.deepEqual(parseKeywords(' AI \n\n抽奖\nai\nAI 助手 '), ['AI', '抽奖', 'AI 助手']);
   assert.deepEqual(parseKeywords(null), []);
   assert.deepEqual(matchingKeywords('OpenAI 抽奖活动', ['ai', '抽奖', '教程']), ['ai', '抽奖']);
-  assert.deepEqual(matchingKeywords('', ['抽奖']), []);
   assert.deepEqual(
     matchingExactKeywords(['人工智能', '开发调优'], ['人工智能', '人工', '开发']),
     ['人工智能'],
   );
+  assert.deepEqual(
+    matchingCategoryKeywords(['福利羊毛, Lv1'], ['福利羊毛', 'Lv1']),
+    ['福利羊毛'],
+  );
 });
 
-test('标题、标签和类别独立过滤，草稿预览后保存并处理新增帖子', async () => {
+test('接口帖子在交给页面前过滤，并保留分页及原始帖子供预览', () => {
+  const { filterTopicPayload, indexCategories } = require(scriptPath);
+  const categoriesById = new Map();
+  indexCategories([
+    { id: 10, name: '福利羊毛' },
+    { id: 11, name: 'Lv1', parent_category_id: 10 },
+    { id: 12, name: '开发调优' },
+  ], categoriesById);
+  const topics = [
+    { id: 1, slug: 'alpha', title: 'OpenAI 发布', tags: [], category_id: 12 },
+    { id: 2, slug: 'beta', title: 'Beta 指南', tags: ['站务'], category_id: 11 },
+    { id: 3, slug: 'gamma', title: 'Gamma 记录', tags: ['人工智能工具'], category_id: 12 },
+  ];
+  const payload = {
+    users: [{ id: 99, username: 'tester' }],
+    topic_list: {
+      topics: structuredClone(topics),
+      more_topics_url: '/latest?page=1',
+    },
+  };
+  let remembered;
+
+  assert.equal(filterTopicPayload(payload, {
+    title: ['openai'],
+    tag: ['人工智能'],
+    category: ['福利羊毛'],
+  }, categoriesById, (value) => { remembered = value; }), true);
+  assert.deepEqual(payload.topic_list.topics.map(({ id }) => id), [3]);
+  assert.deepEqual(remembered.map(({ id }) => id), [1, 2, 3]);
+  assert.equal(payload.topic_list.more_topics_url, '/latest?page=1');
+  assert.deepEqual(payload.users, [{ id: 99, username: 'tester' }]);
+});
+
+test('首屏预载数据先汇集类别，再过滤其中的帖子列表', () => {
+  const { filterPreloadedData } = require(scriptPath);
+  const source = JSON.stringify({
+    topicList: JSON.stringify({
+      topic_list: {
+        topics: [
+          { id: 1, title: '父类别帖子', tags: [], category_id: 10 },
+          { id: 2, title: '子类别帖子', tags: [], category_id: 11 },
+          { id: 3, title: '保留帖子', tags: [], category_id: 12 },
+        ],
+        more_topics_url: '/latest?page=1',
+      },
+    }),
+    site: JSON.stringify({
+      categories: [
+        { id: 10, name: '福利羊毛' },
+        { id: 11, name: 'Lv1', parent_category_id: 10 },
+        { id: 12, name: '开发调优' },
+      ],
+    }),
+  });
+  const remembered = [];
+  const result = JSON.parse(filterPreloadedData(
+    source,
+    { title: [], tag: [], category: ['福利羊毛'] },
+    new Map(),
+    (topics) => remembered.push(...topics),
+  ));
+  const list = JSON.parse(result.topicList);
+
+  assert.deepEqual(list.topic_list.topics.map(({ id }) => id), [3]);
+  assert.deepEqual(remembered.map(({ id }) => id), [1, 2, 3]);
+  assert.equal(list.topic_list.more_topics_url, '/latest?page=1');
+});
+
+test('脚本过滤首屏和后续 XHR；保存后不刷新或改动既有列表', async () => {
   const script = fs.readFileSync(scriptPath, 'utf8');
-  const rowSelector = '.topic-list-item[data-topic-id]';
-  const titleSelector = '.title.raw-topic-link[data-topic-id]';
-  const tagSelector = '.discourse-tag';
-  const categorySelector = '.badge-category__name';
-  const activeClass = 'houmao-linux-do-topic-filter-active';
-  const hiddenClass = 'houmao-linux-do-topic-filter-hidden';
-  const readyClass = 'houmao-linux-do-topic-filter-ready';
-
-  class ClassList {
-    constructor() {
-      this.values = new Set();
-    }
-
-    toggle(value, force) {
-      if (force) this.values.add(value);
-      else this.values.delete(value);
-    }
-
-    contains(value) {
-      return this.values.has(value);
-    }
-  }
 
   class Element {
     constructor(tagName) {
       this.tagName = tagName;
-      this.classList = new ClassList();
       this.children = [];
       this.listeners = {};
       this.hidden = false;
@@ -66,11 +119,6 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
 
     append(...children) {
       this.children.push(...children);
-    }
-
-    appendChild(child) {
-      this.append(child);
-      return child;
     }
 
     replaceChildren(...children) {
@@ -108,41 +156,48 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
     }
   }
 
-  const topic = ({ title, tags = [], category = null }) => {
-    const classList = new ClassList();
-    const anchor = title === null ? null : { textContent: title, href: `https://linux.do/t/${encodeURIComponent(title)}` };
-    const tagElements = tags.map((textContent) => ({ textContent }));
-    const categoryElements = category === null ? [] : [{ textContent: category }];
-    const row = {
-      nodeType: 1,
-      classList,
-      closest: (selector) => selector === rowSelector ? row : null,
-      querySelector: (selector) => selector === titleSelector ? anchor : null,
-      querySelectorAll: (selector) => {
-        if (selector === tagSelector) return tagElements;
-        if (selector === categorySelector) return categoryElements;
-        return [];
-      },
-    };
-    row.addCategory = (textContent) => {
-      const node = {
-        nodeType: 1,
-        textContent,
-        closest: (selector) => selector === rowSelector ? row : null,
-        querySelectorAll: () => [],
-      };
-      categoryElements.push(node);
-      return node;
-    };
-    return row;
-  };
+  class FakeXHR {
+    constructor() {
+      this.listeners = {};
+      this.readyState = 0;
+      this.responseType = '';
+    }
 
-  const alpha = topic({ title: 'Alpha 发布说明', tags: ['人工智能'], category: '开发调优' });
-  const tagged = topic({ title: 'Beta 使用指南', tags: ['人工智能'] });
-  const categorized = topic({ title: 'Gamma 调优记录', category: '开发调优, Lv1' });
-  const partial = topic({ title: 'Delta', tags: ['人工智能工具'], category: '开发调优区' });
-  const untitled = topic({ title: null });
-  const topics = [alpha, tagged, categorized, partial, untitled];
+    open(method, url) {
+      this.method = method;
+      this.url = url;
+    }
+
+    addEventListener(type, listener) {
+      (this.listeners[type] ||= []).push(listener);
+    }
+
+    respond(payload) {
+      Object.defineProperty(this, 'responseText', {
+        configurable: true,
+        value: JSON.stringify(payload),
+      });
+      this.readyState = 4;
+      for (const listener of this.listeners.readystatechange || []) listener();
+    }
+  }
+  FakeXHR.DONE = 4;
+
+  let preloadElement;
+  let observeCallback;
+  let observerDisconnected = false;
+  class MutationObserver {
+    constructor(callback) {
+      observeCallback = callback;
+    }
+
+    observe() {}
+
+    disconnect() {
+      observerDisconnected = true;
+    }
+  }
+
   const body = new Element('body');
   const documentElement = new Element('html');
   const document = {
@@ -150,69 +205,64 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
     documentElement,
     createDocumentFragment: () => new Element('#fragment'),
     createElement: (tagName) => tagName === 'dialog' ? new Dialog() : new Element(tagName),
-    querySelectorAll: (selector) => {
-      assert.equal(selector, rowSelector);
-      return topics;
+    getElementById: (id) => id === 'data-preloaded' ? preloadElement : null,
+    querySelectorAll: () => {
+      throw new Error('不应扫描帖子 DOM');
     },
   };
-
-  let observeCallback;
-  let timerId = 0;
-  const timers = new Map();
-  const flushTimers = () => {
-    const callbacks = [...timers.values()];
-    timers.clear();
-    for (const callback of callbacks) callback();
+  let reloadCount = 0;
+  const pageWindow = {
+    XMLHttpRequest: FakeXHR,
+    location: {
+      pathname: '/latest',
+      search: '',
+      reload: () => { reloadCount += 1; },
+    },
   };
-  class MutationObserver {
-    constructor(callback) {
-      observeCallback = callback;
-    }
-
-    observe() {}
-  }
-
   const stored = new Map([
-    ['keywords', 'alpha\nALPHA'],
-    ['tagKeywords', '人工智能'],
-    ['categoryKeywords', '开发调优'],
+    ['keywords', 'alpha'],
+    ['tagKeywords', ''],
+    ['categoryKeywords', '福利羊毛'],
   ]);
   let menuCommand;
-  const saved = [];
   const context = {
     document,
-    MutationObserver,
-    setTimeout: (callback) => {
-      const id = ++timerId;
-      timers.set(id, callback);
-      return id;
-    },
-    clearTimeout: (id) => timers.delete(id),
     GM_getValue: (key, fallback) => stored.get(key) ?? fallback,
-    GM_setValue: (key, value) => {
-      stored.set(key, value);
-      saved.push([key, value]);
-    },
-    GM_registerMenuCommand: (_label, callback) => {
-      menuCommand = callback;
-    },
+    GM_registerMenuCommand: (_label, callback) => { menuCommand = callback; },
+    GM_setValue: (key, value) => { stored.set(key, value); },
+    MutationObserver,
+    unsafeWindow: pageWindow,
   };
 
   vm.runInNewContext(script, context);
 
-  assert.equal(documentElement.classList.contains(activeClass), true);
-  assert.equal(
-    documentElement.children[0].textContent.includes(
-      `.${activeClass} ${rowSelector}:not(.${readyClass}) {\n      visibility: hidden !important;`,
-    ),
-    true,
-  );
-  assert.equal(alpha.classList.contains(hiddenClass), true);
-  assert.equal(alpha.classList.contains(readyClass), true);
-  assert.equal(tagged.classList.contains(hiddenClass), true);
-  assert.equal(categorized.classList.contains(hiddenClass), true);
-  assert.equal(partial.classList.contains(hiddenClass), false);
-  assert.equal(untitled.classList.contains(hiddenClass), false);
+  preloadElement = new Element('script');
+  preloadElement.textContent = JSON.stringify({
+    topicList: JSON.stringify({
+      topic_list: {
+        topics: [
+          { id: 1, slug: 'alpha', title: 'Alpha 发布', tags: [], category_id: 12 },
+          { id: 2, slug: 'beta', title: 'Beta 指南', tags: [], category_id: 11 },
+          { id: 3, slug: 'gamma', title: 'Gamma 记录', tags: [], category_id: 12 },
+        ],
+        more_topics_url: '/latest?page=1',
+      },
+    }),
+    site: JSON.stringify({
+      categories: [
+        { id: 10, name: '福利羊毛' },
+        { id: 11, name: 'Lv1', parent_category_id: 10 },
+        { id: 12, name: '开发调优' },
+      ],
+    }),
+  });
+  observeCallback();
+
+  const initialOuter = JSON.parse(preloadElement.textContent);
+  const initialList = JSON.parse(initialOuter.topicList);
+  const initialPreloadedText = preloadElement.textContent;
+  assert.deepEqual(initialList.topic_list.topics.map(({ id }) => id), [3]);
+  assert.equal(observerDisconnected, true);
 
   menuCommand();
   const dialog = body.children.find((child) => child.tagName === 'dialog');
@@ -223,86 +273,32 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   const status = dialog.querySelector('.houmao-linux-do-topic-filter-status');
   const preview = dialog.querySelector('.houmao-linux-do-topic-filter-preview');
   const save = dialog.querySelector('.houmao-linux-do-topic-filter-save');
-  assert.equal(titleInput.value, 'alpha');
-  assert.equal(tagInput.value, '人工智能');
-  assert.equal(categoryInput.value, '开发调优');
-  assert.equal(status.textContent, '当前页面将过滤 3 个帖子');
-  assert.equal(preview.children[0].children[0].textContent, 'Alpha 发布说明');
-  assert.equal(
-    preview.children[0].children[1].textContent,
-    '标题：alpha；标签：人工智能；类别：开发调优',
-  );
-  assert.equal(preview.children[1].children[1].textContent, '标签：人工智能');
-  assert.equal(preview.children[2].children[1].textContent, '类别：开发调优');
-
-  titleInput.value = 'beta';
-  tagInput.value = '';
-  categoryInput.value = '';
-  await titleInput.dispatch('input');
-  assert.equal(status.textContent, '当前页面将过滤 1 个帖子');
-  assert.equal(preview.children[0].children[0].textContent, 'Beta 使用指南');
-  assert.equal(preview.children[0].children[1].textContent, '标题：beta');
-  assert.equal(alpha.classList.contains(hiddenClass), true);
-  assert.equal(tagged.classList.contains(hiddenClass), true);
-
-  const newBeta = topic({ title: '另一个 Beta 帖子' });
-  const progressivelyRendered = topic({ title: '分阶段渲染的帖子' });
-  topics.push(newBeta, progressivelyRendered);
-  assert.equal(newBeta.classList.contains(readyClass), false);
-  observeCallback([{ addedNodes: [newBeta, progressivelyRendered] }]);
-  assert.equal(newBeta.classList.contains(readyClass), false);
-  const categoryNode = progressivelyRendered.addCategory('开发调优');
-  observeCallback([{ addedNodes: [categoryNode] }]);
-  assert.equal(progressivelyRendered.classList.contains(readyClass), false);
-  flushTimers();
-  assert.equal(newBeta.classList.contains(readyClass), true);
-  assert.equal(progressivelyRendered.classList.contains(readyClass), true);
-  assert.equal(progressivelyRendered.classList.contains(hiddenClass), true);
-  assert.equal(status.textContent, '当前页面将过滤 2 个帖子');
-  assert.equal(newBeta.classList.contains(hiddenClass), false);
-
-  dialog.close();
-  assert.deepEqual(saved, []);
-  menuCommand();
-  assert.equal(titleInput.value, 'alpha');
-  assert.equal(tagInput.value, '人工智能');
-  assert.equal(categoryInput.value, '开发调优');
-
-  titleInput.value = 'beta';
-  tagInput.value = '站务';
-  categoryInput.value = '搞七捻三';
-  await save.dispatch('click');
-  assert.deepEqual(saved, [
-    ['keywords', 'beta'],
-    ['tagKeywords', '站务'],
-    ['categoryKeywords', '搞七捻三'],
+  assert.equal(status.textContent, '当前已加载数据将过滤 2 个帖子');
+  assert.deepEqual(preview.children.map((item) => item.children[0].textContent), [
+    'Alpha 发布',
+    'Beta 指南',
   ]);
-  assert.equal(alpha.classList.contains(hiddenClass), false);
-  assert.equal(tagged.classList.contains(hiddenClass), true);
-  assert.equal(categorized.classList.contains(hiddenClass), false);
-  assert.equal(newBeta.classList.contains(hiddenClass), true);
 
-  const laterTag = topic({ title: '站点公告', tags: ['站务'] });
-  const laterCategory = topic({ title: '闲聊', category: '搞七捻三' });
-  const similarTag = topic({ title: '近似标签', tags: ['站务公告'] });
-  topics.push(laterTag, laterCategory, similarTag);
-  observeCallback([{ addedNodes: [laterTag, laterCategory, similarTag] }]);
-  flushTimers();
-  assert.equal(laterTag.classList.contains(hiddenClass), true);
-  assert.equal(laterCategory.classList.contains(hiddenClass), true);
-  assert.equal(similarTag.classList.contains(hiddenClass), false);
-
-  menuCommand();
-  titleInput.value = '';
+  titleInput.value = 'gamma';
   tagInput.value = '';
   categoryInput.value = '';
   await save.dispatch('click');
-  assert.equal(documentElement.classList.contains(activeClass), false);
-  assert.equal(stored.get('keywords'), '');
-  assert.equal(stored.get('tagKeywords'), '');
-  assert.equal(stored.get('categoryKeywords'), '');
-  assert.equal(tagged.classList.contains(hiddenClass), false);
-  assert.equal(newBeta.classList.contains(hiddenClass), false);
-  assert.equal(laterTag.classList.contains(hiddenClass), false);
-  assert.equal(laterCategory.classList.contains(hiddenClass), false);
+  assert.equal(reloadCount, 0);
+  assert.equal(stored.get('keywords'), 'gamma');
+  assert.equal(preloadElement.textContent, initialPreloadedText);
+
+  const xhr = new FakeXHR();
+  xhr.open('GET', '/latest.json?page=1');
+  xhr.respond({
+    topic_list: {
+      topics: [
+        { id: 4, slug: 'gamma-2', title: '另一个 Gamma 帖子', tags: [], category_id: 12 },
+        { id: 5, slug: 'delta', title: 'Delta 帖子', tags: [], category_id: 12 },
+      ],
+      more_topics_url: '/latest?page=2',
+    },
+  });
+  const nextList = JSON.parse(xhr.responseText);
+  assert.deepEqual(nextList.topic_list.topics.map(({ id }) => id), [5]);
+  assert.equal(nextList.topic_list.more_topics_url, '/latest?page=2');
 });

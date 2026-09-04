@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.2.4
+// @version      0.3.0
 // @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/linux-do-topic-filter.user.js
 // @downloadURL  https://raw.githubusercontent.com/fanjindong/houmao/main/scripts/linux-do-topic-filter.user.js
 // ==/UserScript==
@@ -34,12 +35,16 @@
   };
 
   const matchingExactKeywords = (values, keywords) => {
-    const normalizedValues = new Set(values.map((value) => value.toLowerCase()));
+    const normalizedValues = new Set(
+      values.filter((value) => typeof value === 'string').map((value) => value.toLowerCase()),
+    );
     return keywords.filter((keyword) => normalizedValues.has(keyword.toLowerCase()));
   };
 
   const matchingCategoryKeywords = (values, keywords) => {
-    const normalizedValues = values.map((value) => value.toLowerCase());
+    const normalizedValues = values
+      .filter((value) => typeof value === 'string')
+      .map((value) => value.toLowerCase());
     return keywords.filter((keyword) => {
       const normalizedKeyword = keyword.toLowerCase();
       return normalizedValues.some(
@@ -48,8 +53,104 @@
     });
   };
 
+  const indexCategories = (categories, categoriesById) => {
+    if (!Array.isArray(categories)) return;
+    for (const category of categories) {
+      if (category?.id != null && typeof category.name === 'string') {
+        categoriesById.set(String(category.id), category);
+      }
+    }
+  };
+
+  const indexPayloadCategories = (payload, categoriesById) => {
+    indexCategories(payload?.categories, categoriesById);
+    indexCategories(payload?.category_list?.categories, categoriesById);
+    indexCategories(payload?.topic_list?.categories, categoriesById);
+  };
+
+  const categoryPath = (categoryId, categoriesById) => {
+    const names = [];
+    const seen = new Set();
+    let category = categoriesById.get(String(categoryId));
+
+    while (category && !seen.has(String(category.id))) {
+      seen.add(String(category.id));
+      if (typeof category.name === 'string' && category.name.trim()) names.unshift(category.name.trim());
+      category = categoriesById.get(String(category.parent_category_id));
+    }
+
+    return names.join(', ');
+  };
+
+  const topicDetails = (topic, rules, categoriesById) => {
+    const title = typeof topic?.title === 'string' ? topic.title.trim() : '';
+    if (!title) return { topic, title, href: '', matches: [] };
+
+    const tags = Array.isArray(topic.tags)
+      ? topic.tags.map((tag) => typeof tag === 'string' ? tag : tag?.name).filter(Boolean)
+      : [];
+    const category = categoryPath(topic.category_id, categoriesById);
+    const matches = [
+      { label: '标题', keywords: matchingKeywords(title, rules.title || []) },
+      { label: '标签', keywords: matchingExactKeywords(tags, rules.tag || []) },
+      {
+        label: '类别',
+        keywords: matchingCategoryKeywords(category ? [category] : [], rules.category || []),
+      },
+    ].filter((match) => match.keywords.length);
+    const href = topic.id == null
+      ? ''
+      : topic.slug
+        ? `/t/${topic.slug}/${topic.id}`
+        : `/t/${topic.id}`;
+    return { topic, title, href, matches };
+  };
+
+  const filterTopicPayload = (payload, rules, categoriesById, rememberTopics) => {
+    if (!payload || typeof payload !== 'object') return false;
+    indexPayloadCategories(payload, categoriesById);
+    const topics = payload.topic_list?.topics;
+    if (!Array.isArray(topics)) return false;
+
+    rememberTopics?.(topics);
+    payload.topic_list.topics = topics.filter(
+      (topic) => topicDetails(topic, rules, categoriesById).matches.length === 0,
+    );
+    return true;
+  };
+
+  const filterPreloadedData = (source, rules, categoriesById, rememberTopics) => {
+    const preloaded = JSON.parse(source);
+    const entries = [];
+
+    for (const [key, serialized] of Object.entries(preloaded)) {
+      try {
+        const payload = typeof serialized === 'string' ? JSON.parse(serialized) : serialized;
+        entries.push({ key, payload, serialized: typeof serialized === 'string' });
+        indexPayloadCategories(payload, categoriesById);
+      } catch {}
+    }
+
+    for (const entry of entries) {
+      if (filterTopicPayload(entry.payload, rules, categoriesById, rememberTopics)) {
+        preloaded[entry.key] = entry.serialized ? JSON.stringify(entry.payload) : entry.payload;
+      }
+    }
+
+    return JSON.stringify(preloaded);
+  };
+
   if (typeof module === 'object' && module.exports) {
-    module.exports = { parseKeywords, matchingKeywords, matchingExactKeywords };
+    module.exports = {
+      filterPreloadedData,
+      filterTopicPayload,
+      indexCategories,
+      matchingCategoryKeywords,
+      matchingExactKeywords,
+      matchingKeywords,
+      parseKeywords,
+      topicDetails,
+    };
   }
   if (typeof document === 'undefined') return;
 
@@ -59,37 +160,37 @@
     category: 'categoryKeywords',
   };
   const prefix = 'houmao-linux-do-topic-filter';
-  const activeClass = `${prefix}-active`;
-  const hiddenClass = `${prefix}-hidden`;
-  const readyClass = `${prefix}-ready`;
-  const rowSelector = '.topic-list-item[data-topic-id]';
-  const titleSelector = '.title.raw-topic-link[data-topic-id]';
-  const tagSelector = '.discourse-tag';
-  const categorySelector = '.badge-category__name';
+  const pageWindow = typeof unsafeWindow === 'undefined' ? window : unsafeWindow;
+  const categoriesById = new Map();
+  const topicsById = new Map();
   let filters = {
     title: parseKeywords(GM_getValue(storageKeys.title, '')),
     tag: parseKeywords(GM_getValue(storageKeys.tag, '')),
     category: parseKeywords(GM_getValue(storageKeys.category, '')),
   };
+  let cachePage;
   let dialog;
-  let settleTimer;
-  const pendingRows = new Set();
 
-  const syncActiveState = () => {
-    document.documentElement.classList.toggle(
-      activeClass,
-      Object.values(filters).some((keywords) => keywords.length),
-    );
+  const currentPage = () => `${pageWindow.location.pathname}${pageWindow.location.search}`;
+
+  const syncTopicCache = () => {
+    const page = currentPage();
+    if (page !== cachePage) {
+      topicsById.clear();
+      cachePage = page;
+    }
+  };
+
+  const rememberTopics = (topics) => {
+    syncTopicCache();
+    for (const topic of topics) {
+      if (topic?.id != null) topicsById.set(String(topic.id), topic);
+    }
+    if (dialog?.open) renderPreview();
   };
 
   const style = document.createElement('style');
   style.textContent = `
-    .${activeClass} ${rowSelector}:not(.${readyClass}) {
-      visibility: hidden !important;
-    }
-    .${hiddenClass} {
-      display: none !important;
-    }
     dialog.${prefix}-dialog {
       box-sizing: border-box;
       width: min(680px, calc(100vw - 32px));
@@ -240,52 +341,9 @@
     }
   `;
   document.documentElement.append(style);
-  syncActiveState();
-
-  const textValues = (row, selector) => Array.from(
-    row.querySelectorAll(selector),
-    (element) => element.textContent?.trim() || '',
-  ).filter(Boolean);
-
-  const topicDetails = (row, rules) => {
-    const link = row.querySelector(titleSelector);
-    const title = link?.textContent?.trim() || '';
-    if (!link || !title) return { link, title, matches: [] };
-    const matches = [
-      { label: '标题', keywords: matchingKeywords(title, rules.title) },
-      { label: '标签', keywords: matchingExactKeywords(textValues(row, tagSelector), rules.tag) },
-      { label: '类别', keywords: matchingCategoryKeywords(textValues(row, categorySelector), rules.category) },
-    ].filter((match) => match.keywords.length);
-    return { link, title, matches };
-  };
-
-  const filterRow = (row) => {
-    const { matches } = topicDetails(row, filters);
-    row.classList.toggle(hiddenClass, matches.length > 0);
-    row.classList.toggle(readyClass, true);
-  };
-
-  const filterAll = () => {
-    for (const row of document.querySelectorAll(rowSelector)) {
-      if (!pendingRows.has(row)) filterRow(row);
-    }
-  };
-
-  const settleRows = (rows) => {
-    if (!rows.size) return;
-    for (const row of rows) pendingRows.add(row);
-    clearTimeout(settleTimer);
-    // ponytail: 50ms 覆盖当前分批渲染；若站点渲染变慢，再接入 Discourse 生命周期。
-    settleTimer = setTimeout(() => {
-      const settledRows = [...pendingRows];
-      pendingRows.clear();
-      settleTimer = undefined;
-      for (const row of settledRows) filterRow(row);
-      if (dialog?.open) renderPreview();
-    }, 50);
-  };
 
   const renderPreview = () => {
+    syncTopicCache();
     const titleInput = dialog.querySelector(`.${prefix}-title-input`);
     const tagInput = dialog.querySelector(`.${prefix}-tag-input`);
     const categoryInput = dialog.querySelector(`.${prefix}-category-input`);
@@ -296,26 +354,23 @@
       tag: parseKeywords(tagInput.value),
       category: parseKeywords(categoryInput.value),
     };
-    const matchedTopics = [];
+    const matchedTopics = [...topicsById.values()]
+      .map((topic) => topicDetails(topic, draft, categoriesById))
+      .filter((details) => details.matches.length);
 
-    for (const row of document.querySelectorAll(rowSelector)) {
-      const details = topicDetails(row, draft);
-      if (details.matches.length) matchedTopics.push(details);
-    }
-
-    status.textContent = `当前页面将过滤 ${matchedTopics.length} 个帖子`;
+    status.textContent = `当前已加载数据将过滤 ${matchedTopics.length} 个帖子`;
     const fragment = document.createDocumentFragment();
-    for (const { link: sourceLink, title, matches } of matchedTopics) {
+    for (const { href, title, matches } of matchedTopics) {
       const item = document.createElement('li');
       const link = document.createElement('a');
       const match = document.createElement('span');
-      link.href = sourceLink.href;
+      link.href = href;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.textContent = title;
       match.className = `${prefix}-match`;
       match.textContent = matches
-        .map(({ label, keywords: matchedKeywords }) => `${label}：${matchedKeywords.join('、')}`)
+        .map(({ label, keywords }) => `${label}：${keywords.join('、')}`)
         .join('；');
       item.append(link, match);
       fragment.append(item);
@@ -345,7 +400,7 @@
         </div>
         <footer class="${prefix}-footer">
           <button type="submit" value="cancel" class="${prefix}-button">取消</button>
-          <button type="button" class="${prefix}-button ${prefix}-save">保存并应用</button>
+          <button type="button" class="${prefix}-button ${prefix}-save">保存</button>
         </footer>
       </form>
     `;
@@ -371,8 +426,6 @@
           GM_setValue(storageKeys.category, nextFilters.category.join('\n')),
         ]);
         filters = nextFilters;
-        syncActiveState();
-        filterAll();
         element.close();
       } catch {
         error.textContent = '保存失败，请稍后重试。';
@@ -400,24 +453,58 @@
     titleInput.focus();
   };
 
-  const observer = new MutationObserver((records) => {
-    const rows = new Set();
-    for (const record of records) {
-      for (const node of record.addedNodes) {
-        const ancestor = node.nodeType === 1
-          ? node.closest?.(rowSelector)
-          : node.parentElement?.closest?.(rowSelector);
-        if (ancestor && !ancestor.classList.contains(readyClass)) rows.add(ancestor);
-        for (const row of node.querySelectorAll?.(rowSelector) || []) {
-          if (!row.classList.contains(readyClass)) rows.add(row);
-        }
-      }
-    }
+  const installXhrFilter = () => {
+    const originalOpen = pageWindow.XMLHttpRequest?.prototype.open;
+    if (typeof originalOpen !== 'function') return;
+    const processed = new WeakSet();
 
-    settleRows(rows);
-  });
+    pageWindow.XMLHttpRequest.prototype.open = function (...args) {
+      const result = originalOpen.apply(this, args);
+      this.addEventListener('readystatechange', () => {
+        if (this.readyState !== 4 || processed.has(this)) return;
+        processed.add(this);
 
-  observer.observe(document, { childList: true, subtree: true });
+        try {
+          if (this.responseType === 'json') {
+            filterTopicPayload(this.response, filters, categoriesById, rememberTopics);
+          } else if (!this.responseType || this.responseType === 'text') {
+            const payload = JSON.parse(this.responseText);
+            if (filterTopicPayload(payload, filters, categoriesById, rememberTopics)) {
+              Object.defineProperty(this, 'responseText', {
+                configurable: true,
+                value: JSON.stringify(payload),
+              });
+            }
+          }
+        } catch {}
+      }, true);
+      return result;
+    };
+  };
+
+  const installPreloadedFilter = () => {
+    const process = () => {
+      const element = document.getElementById('data-preloaded');
+      if (!element) return false;
+      try {
+        element.textContent = filterPreloadedData(
+          element.textContent,
+          filters,
+          categoriesById,
+          rememberTopics,
+        );
+      } catch {}
+      return true;
+    };
+
+    if (process()) return;
+    const observer = new MutationObserver(() => {
+      if (process()) observer.disconnect();
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  };
+
+  installXhrFilter();
+  installPreloadedFilter();
   GM_registerMenuCommand('设置帖子过滤词', openSettings);
-  filterAll();
 }());
