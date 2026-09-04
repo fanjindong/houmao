@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.2.2
+// @version      0.2.3
 // @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -72,6 +72,8 @@
     category: parseKeywords(GM_getValue(storageKeys.category, '')),
   };
   let dialog;
+  let settleTimer;
+  const pendingRows = new Set();
 
   const syncActiveState = () => {
     document.documentElement.classList.toggle(
@@ -264,7 +266,23 @@
   };
 
   const filterAll = () => {
-    for (const row of document.querySelectorAll(rowSelector)) filterRow(row);
+    for (const row of document.querySelectorAll(rowSelector)) {
+      if (!pendingRows.has(row)) filterRow(row);
+    }
+  };
+
+  const settleRows = (rows) => {
+    if (!rows.size) return;
+    for (const row of rows) pendingRows.add(row);
+    clearTimeout(settleTimer);
+    // ponytail: 50ms 覆盖当前分批渲染；若站点渲染变慢，再接入 Discourse 生命周期。
+    settleTimer = setTimeout(() => {
+      const settledRows = [...pendingRows];
+      pendingRows.clear();
+      settleTimer = undefined;
+      for (const row of settledRows) filterRow(row);
+      if (dialog?.open) renderPreview();
+    }, 50);
   };
 
   const renderPreview = () => {
@@ -389,13 +407,14 @@
         const ancestor = node.nodeType === 1
           ? node.closest?.(rowSelector)
           : node.parentElement?.closest?.(rowSelector);
-        if (ancestor) rows.add(ancestor);
-        for (const row of node.querySelectorAll?.(rowSelector) || []) rows.add(row);
+        if (ancestor && !ancestor.classList.contains(readyClass)) rows.add(ancestor);
+        for (const row of node.querySelectorAll?.(rowSelector) || []) {
+          if (!row.classList.contains(readyClass)) rows.add(row);
+        }
       }
     }
 
-    for (const row of rows) filterRow(row);
-    if (rows.size && dialog?.open) renderPreview();
+    settleRows(rows);
   });
 
   observer.observe(document, { childList: true, subtree: true });

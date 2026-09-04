@@ -124,6 +124,16 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
         return [];
       },
     };
+    row.addCategory = (textContent) => {
+      const node = {
+        nodeType: 1,
+        textContent,
+        closest: (selector) => selector === rowSelector ? row : null,
+        querySelectorAll: () => [],
+      };
+      categoryElements.push(node);
+      return node;
+    };
     return row;
   };
 
@@ -147,6 +157,13 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   };
 
   let observeCallback;
+  let timerId = 0;
+  const timers = new Map();
+  const flushTimers = () => {
+    const callbacks = [...timers.values()];
+    timers.clear();
+    for (const callback of callbacks) callback();
+  };
   class MutationObserver {
     constructor(callback) {
       observeCallback = callback;
@@ -165,6 +182,12 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   const context = {
     document,
     MutationObserver,
+    setTimeout: (callback) => {
+      const id = ++timerId;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimeout: (id) => timers.delete(id),
     GM_getValue: (key, fallback) => stored.get(key) ?? fallback,
     GM_setValue: (key, value) => {
       stored.set(key, value);
@@ -223,10 +246,18 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   assert.equal(tagged.classList.contains(hiddenClass), true);
 
   const newBeta = topic({ title: '另一个 Beta 帖子' });
-  topics.push(newBeta);
+  const progressivelyRendered = topic({ title: '分阶段渲染的帖子' });
+  topics.push(newBeta, progressivelyRendered);
   assert.equal(newBeta.classList.contains(readyClass), false);
-  observeCallback([{ addedNodes: [newBeta] }]);
+  observeCallback([{ addedNodes: [newBeta, progressivelyRendered] }]);
+  assert.equal(newBeta.classList.contains(readyClass), false);
+  const categoryNode = progressivelyRendered.addCategory('开发调优');
+  observeCallback([{ addedNodes: [categoryNode] }]);
+  assert.equal(progressivelyRendered.classList.contains(readyClass), false);
+  flushTimers();
   assert.equal(newBeta.classList.contains(readyClass), true);
+  assert.equal(progressivelyRendered.classList.contains(readyClass), true);
+  assert.equal(progressivelyRendered.classList.contains(hiddenClass), true);
   assert.equal(status.textContent, '当前页面将过滤 2 个帖子');
   assert.equal(newBeta.classList.contains(hiddenClass), false);
 
@@ -256,6 +287,7 @@ test('标题、标签和类别独立过滤，草稿预览后保存并处理新�
   const similarTag = topic({ title: '近似标签', tags: ['站务公告'] });
   topics.push(laterTag, laterCategory, similarTag);
   observeCallback([{ addedNodes: [laterTag, laterCategory, similarTag] }]);
+  flushTimers();
   assert.equal(laterTag.classList.contains(hiddenClass), true);
   assert.equal(laterCategory.classList.contains(hiddenClass), true);
   assert.equal(similarTag.classList.contains(hiddenClass), false);
