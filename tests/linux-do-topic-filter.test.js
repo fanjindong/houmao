@@ -276,6 +276,12 @@ test('脚本过滤首屏和后续 XHR；保存后不刷新或改动既有列表'
   vm.runInNewContext(script, context);
 
   preloadElement = new Element('script');
+  // HTML 分段到达时，预载节点可能先出现，JSON 内容稍后才写完整。
+  observeCallback();
+  assert.equal(observerDisconnected, false, '空预载节点不能导致停止监听');
+  preloadElement.textContent = '{"site":';
+  observeCallback();
+  assert.equal(observerDisconnected, false, '未完成的 JSON 不能导致停止监听');
   preloadElement.textContent = JSON.stringify({
     topicList: JSON.stringify({
       topic_list: {
@@ -317,6 +323,16 @@ test('脚本过滤首屏和后续 XHR；保存后不刷新或改动既有列表'
     'Alpha 发布',
     'Beta 指南',
   ]);
+
+  const categoryXhr = new FakeXHR();
+  categoryXhr.open('GET', '/latest.json?page=1');
+  categoryXhr.respond({
+    topic_list: {
+      topics: [{ id: 6, title: '后续类别帖子', category_id: 11 }],
+    },
+  });
+  assert.deepEqual(JSON.parse(categoryXhr.responseText).topic_list.topics, []);
+  assert.ok(preview.children.some((item) => item.children[0].textContent === '后续类别帖子'));
 
   titleInput.value = 'gamma';
   tagInput.value = '';

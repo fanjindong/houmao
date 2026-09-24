@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.3.1
+// @version      0.3.2
 // @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -494,15 +494,18 @@
           categoriesById,
           rememberTopics,
         );
-      } catch {}
-      return true;
+        return true;
+      } catch {
+        // 预载节点可能早于完整 JSON 到达，解析成功后才可停止监听。
+        return false;
+      }
     };
 
     if (process()) return;
     const observer = new MutationObserver(() => {
       if (process()) observer.disconnect();
     });
-    observer.observe(document, { childList: true, subtree: true });
+    observer.observe(document, { childList: true, characterData: true, subtree: true });
   };
 
   installXhrFilter();
