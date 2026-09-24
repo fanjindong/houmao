@@ -95,6 +95,45 @@ test('首屏预载数据先汇集类别，再过滤其中的帖子列表', () =>
   assert.equal(list.topic_list.more_topics_url, '/latest?page=1');
 });
 
+test('网盘资源自身有父类别时，首屏、后续帖子及预览均匹配自身和祖先名称', () => {
+  const { filterPreloadedData, filterTopicPayload, topicDetails } = require(scriptPath);
+  const categories = [
+    { id: 14, name: '父类别示例' },
+    { id: 94, name: '网盘资源', parent_category_id: 14 },
+    { id: 95, name: '网盘资源, Lv1', parent_category_id: 94 },
+    { id: 96, name: '网盘资源, Lv2', parent_category_id: 94 },
+    { id: 97, name: '其他类别', parent_category_id: 14 },
+    { id: 98, name: '网盘资源交流', parent_category_id: 14 },
+  ];
+  const topics = [
+    { id: 2945709, title: '国学堂徐文兵梁冬《黄帝内经》第二季通天篇（完结）', category_id: 94 },
+    { id: 2, title: '一级子类帖子', category_id: 95 },
+    { id: 3, title: '二级子类帖子', category_id: 96 },
+    { id: 4, title: '同级类别帖子', category_id: 97 },
+    { id: 5, title: '近似名称帖子', category_id: 98 },
+  ];
+  const rules = { category: ['网盘资源'] };
+  const categoriesById = new Map();
+  const result = JSON.parse(filterPreloadedData(JSON.stringify({
+    topicList: JSON.stringify({ topic_list: { topics } }),
+    site: JSON.stringify({ categories }),
+  }), rules, categoriesById));
+  assert.deepEqual(JSON.parse(result.topicList).topic_list.topics.map(t => t.id), [4, 5]);
+
+  const payload = { topic_list: { topics: structuredClone(topics) } };
+  filterTopicPayload(payload, rules, categoriesById);
+  assert.deepEqual(payload.topic_list.topics.map(t => t.id), [4, 5]);
+  for (const topic of topics.slice(0, 3)) {
+    assert.deepEqual(topicDetails(topic, rules, categoriesById).matches, [
+      { label: '类别', keywords: ['网盘资源'] },
+    ]);
+  }
+  const childRules = { category: ['网盘资源, Lv1'] };
+  assert.equal(topicDetails(topics[0], childRules, categoriesById).matches.length, 0);
+  assert.equal(topicDetails(topics[1], childRules, categoriesById).matches.length, 1);
+  assert.equal(topicDetails(topics[2], childRules, categoriesById).matches.length, 0);
+});
+
 test('脚本过滤首屏和后续 XHR；保存后不刷新或改动既有列表', async () => {
   const script = fs.readFileSync(scriptPath, 'utf8');
 

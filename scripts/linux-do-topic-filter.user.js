@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.3.0
+// @version      0.3.1
 // @description  按标题、标签和类别过滤 linux.do 帖子，并在应用前预览
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -68,7 +68,7 @@
     indexCategories(payload?.topic_list?.categories, categoriesById);
   };
 
-  const categoryPath = (categoryId, categoriesById) => {
+  const categoryNames = (categoryId, categoriesById) => {
     const names = [];
     const seen = new Set();
     let category = categoriesById.get(String(categoryId));
@@ -79,7 +79,8 @@
       category = categoriesById.get(String(category.parent_category_id));
     }
 
-    return names.join(', ');
+    // 类别本身也可能有父类别，逐项匹配才能覆盖任意层级的名称。
+    return names;
   };
 
   const topicDetails = (topic, rules, categoriesById) => {
@@ -89,13 +90,13 @@
     const tags = Array.isArray(topic.tags)
       ? topic.tags.map((tag) => typeof tag === 'string' ? tag : tag?.name).filter(Boolean)
       : [];
-    const category = categoryPath(topic.category_id, categoriesById);
+    const categories = categoryNames(topic.category_id, categoriesById);
     const matches = [
       { label: '标题', keywords: matchingKeywords(title, rules.title || []) },
       { label: '标签', keywords: matchingExactKeywords(tags, rules.tag || []) },
       {
         label: '类别',
-        keywords: matchingCategoryKeywords(category ? [category] : [], rules.category || []),
+        keywords: matchingCategoryKeywords(categories, rules.category || []),
       },
     ].filter((match) => match.keywords.length);
     const href = topic.id == null
