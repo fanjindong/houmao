@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.5.0
+// @version      0.5.1
 // @description  按标题、标签和类别过滤帖子，查看过滤记录并放行单帖
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -115,7 +115,7 @@
 
     const details = topics.map((topic) => topicDetails(topic, rules, categoriesById));
     payload.topic_list.topics = details.filter((entry) => !entry.matches.length).map((entry) => entry.topic);
-    rememberTopics?.(topics, details);
+    rememberTopics?.(topics, details, payload.topic_list.more_topics_url);
     return true;
   };
 
@@ -179,6 +179,7 @@
   const pageWindow = typeof unsafeWindow === 'undefined' ? window : unsafeWindow;
   const categoriesById = new Map();
   const pages = new Map();
+  const paginationPageKeys = new Map();
   const storedAllowed = GM_getValue(storageKeys.allowed, []);
   let allowedTopics = new Map((Array.isArray(storedAllowed) ? storedAllowed : [])
     .filter((topic) => topic && /^\d+$/.test(String(topic.id)) && typeof topic.title === 'string')
@@ -205,7 +206,11 @@
   const pageData = () => pages.get(currentPage());
   const activeRules = () => ({ ...filters, allowedTopicIds: new Set(allowedTopics.keys()) });
 
-  const rememberTopics = (key, details) => {
+  const rememberTopics = (key, details, moreTopicsUrl) => {
+    // 标签页的分页链接会补入 tags[] 等参数，由服务端链接确定归属，不能删掉筛选条件。
+    if (typeof moreTopicsUrl === 'string' && moreTopicsUrl) {
+      paginationPageKeys.set(listPageKey(moreTopicsUrl, pageWindow.location.origin), key);
+    }
     let data = pages.get(key);
     if (!data) {
       data = { topics: new Map(), filtered: new Map() };
@@ -813,14 +818,15 @@
 
     pageWindow.XMLHttpRequest.prototype.open = function (...args) {
       const result = originalOpen.apply(this, args);
-      const key = listPageKey(args[1], pageWindow.location.origin);
+      const requestKey = listPageKey(args[1], pageWindow.location.origin);
+      const key = paginationPageKeys.get(requestKey) || requestKey;
       this.addEventListener('readystatechange', () => {
         if (this.readyState !== 4 || processed.has(this)) return;
         processed.add(this);
 
         try {
           const batches = [];
-          const collect = (_topics, details) => batches.push(details);
+          const collect = (_topics, details, moreTopicsUrl) => batches.push({ details, moreTopicsUrl });
           if (this.responseType === 'json') {
             filterTopicPayload(this.response, activeRules(), categoriesById, collect);
           } else if (!this.responseType || this.responseType === 'text') {
@@ -833,7 +839,7 @@
             }
           }
           // 响应成功改写后才记录数量，避免将未能交给页面的结果算作已过滤。
-          for (const details of batches) rememberTopics(key, details);
+          for (const { details, moreTopicsUrl } of batches) rememberTopics(key, details, moreTopicsUrl);
         } catch {}
       }, true);
       return result;
@@ -850,9 +856,9 @@
           element.textContent,
           activeRules(),
           categoriesById,
-          (_topics, details) => batches.push(details),
+          (_topics, details, moreTopicsUrl) => batches.push({ details, moreTopicsUrl }),
         );
-        for (const details of batches) rememberTopics(currentPage(), details);
+        for (const { details, moreTopicsUrl } of batches) rememberTopics(currentPage(), details, moreTopicsUrl);
         return true;
       } catch {
         // 预载节点可能早于完整 JSON 到达，解析成功后才可停止监听。

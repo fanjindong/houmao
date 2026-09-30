@@ -288,7 +288,10 @@ const respondTopics = (browser, topics, url = '/latest.json', type = '') => {
   const xhr = new browser.FakeXHR();
   xhr.responseType = type;
   xhr.open('GET', url);
-  xhr.respond({ topic_list: { topics, more_topics_url: '/latest?page=2' } });
+  const next = new URL(url, 'https://linux.do');
+  next.pathname = next.pathname.replace(/\.json$/, '');
+  next.searchParams.set('page', '2');
+  xhr.respond({ topic_list: { topics, more_topics_url: `${next.pathname}${next.search}` } });
   return type === 'json' ? xhr.response : JSON.parse(xhr.responseText);
 };
 const titles = (list) => list.querySelectorAll('.houmao-linux-do-topic-filter-topic-link').map((link) => link.textContent);
@@ -441,6 +444,70 @@ test('接口先于地址变化和旧页迟到响应均不串页', () => {
   assert.match(browser.launcher.title, /尚未取得/);
   browser.pageWindow.location.pathname = '/latest'; browser.windowListeners.popstate();
   assert.equal(browser.launcher.textContent, '过滤 2');
+});
+
+test('真实标签页分页附带标签参数时，沿 more_topics_url 累计到当前列表', async () => {
+  const browser = createBrowser();
+  browser.pageWindow.history.pushState({}, '', '/tag/444-tag/444');
+  // 来自 LINUX DO 人工智能标签页的预载分页地址，地址栏没有这两项标签参数。
+  const moreUrl = (page) => `/tag/444-tag/444?match_all_tags=true&page=${page}&tags%5B%5D=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD`;
+  const requestUrl = (page) => moreUrl(page).replace('/444?', '/444.json?');
+  const preload = new browser.Element('script');
+  preload.textContent = JSON.stringify({ topic_list: JSON.stringify({ topic_list: {
+    topics: [{ id: 1, title: 'Alpha 首屏' }, { id: 2, title: '首屏保留' }],
+    more_topics_url: moreUrl(1),
+  } }) });
+  browser.setPreload(preload);
+  browser.observe();
+  await browser.launcher.dispatch('click');
+
+  const first = new browser.FakeXHR();
+  first.open('GET', requestUrl(1));
+  first.respond({ topic_list: {
+    topics: [{ id: 3, title: 'Alpha 第二页' }, { id: 4, title: '第二页保留' }],
+    more_topics_url: moreUrl(2),
+  } });
+  assert.deepEqual(JSON.parse(first.responseText).topic_list.topics.map((topic) => topic.id), [4]);
+  assert.equal(control(browser.drawer, 'actual-status').textContent, '本页已读取 4 条，已过滤 2 条');
+
+  const second = new browser.FakeXHR();
+  second.responseType = 'json';
+  second.open('GET', requestUrl(2));
+  second.respond({ topic_list: {
+    topics: [{ id: 4, title: '第二页保留' }, { id: 5, title: 'Alpha 第三页' }, { id: 6, title: '第三页保留' }],
+    more_topics_url: null,
+  } });
+  assert.equal(control(browser.drawer, 'actual-status').textContent, '本页已读取 6 条，已过滤 3 条');
+  assert.deepEqual(titles(control(browser.drawer, 'actual-list')), ['Alpha 首屏', 'Alpha 第二页', 'Alpha 第三页']);
+  await control(browser.drawer, 'rules-tab').dispatch('click');
+  assert.equal(control(browser.drawer, 'status').textContent, '预计过滤 3 条');
+});
+
+test('分页归属来自服务器链接，切换排序后迟到的分页仍记回原列表', async () => {
+  const browser = createBrowser();
+  const pathname = '/tag/444-tag/444';
+  const more = `${pathname}?match_all_tags=true&page=1&tags%5B%5D=人工智能`;
+  browser.pageWindow.history.pushState({}, '', pathname);
+  const first = new browser.FakeXHR();
+  first.open('GET', `${pathname}.json`);
+  first.respond({ topic_list: { topics: [{ id: 1, title: 'Alpha 最新列表' }], more_topics_url: more } });
+  const pending = new browser.FakeXHR();
+  pending.open('GET', more.replace('/444?', '/444.json?'));
+
+  browser.pageWindow.history.pushState({}, '', `${pathname}?order=created`);
+  const sorted = new browser.FakeXHR();
+  sorted.open('GET', `${pathname}.json?order=created`);
+  sorted.respond({ topic_list: { topics: [{ id: 2, title: '按创建时间保留' }], more_topics_url: `${more}&order=created` } });
+  pending.respond({ topic_list: { topics: [{ id: 3, title: 'Alpha 最新列表迟到分页' }] } });
+  await browser.launcher.dispatch('click');
+  assert.equal(control(browser.drawer, 'actual-status').textContent, '本页已读取 1 条，已过滤 0 条');
+
+  const sortedPage = new browser.FakeXHR();
+  sortedPage.open('GET', `${more.replace('/444?', '/444.json?')}&order=created`);
+  sortedPage.respond({ topic_list: { topics: [{ id: 4, title: 'Alpha 创建时间分页' }] } });
+  assert.equal(control(browser.drawer, 'actual-status').textContent, '本页已读取 2 条，已过滤 1 条');
+  browser.pageWindow.history.pushState({}, '', pathname);
+  assert.equal(control(browser.drawer, 'actual-status').textContent, '本页已读取 2 条，已过滤 2 条');
 });
 
 test('更多菜单放行单帖，保留清单可撤销；刷新后优先于三类过滤', async () => {
