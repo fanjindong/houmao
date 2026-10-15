@@ -1,0 +1,155 @@
+<!doctype html>
+<!-- 在仓库根目录启动 python3 -m http.server，再打开本页。
+     layout=desktop、mobile、states 分别对应三张流程图，按整页截图保存。
+     图示直接载入当前用户脚本；修改界面后重新生成对应 PNG。 -->
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>帖子过滤器界面图示</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #243044; background: #f2f6fb; font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  body.diagram { width: max-content; }
+  header { padding: 20px 28px 14px; }
+  h1 { margin: 0; font-size: 25px; }
+  header p { margin: 4px 0 0; color: #65748b; }
+  .board { display: grid; grid-template-columns: repeat(2, 800px); gap: 22px; padding: 8px 28px 28px; }
+  figure { margin: 0; }
+  .frame { width: 800px; height: 600px; overflow: hidden; border: 1px solid #d7e0eb; border-radius: 10px; background: white; }
+  iframe { width: 1000px; height: 750px; border: 0; transform: scale(.8); transform-origin: top left; }
+  figcaption { padding: 9px 2px 0; font-size: 17px; font-weight: 600; }
+  .mobile { grid-template-columns: repeat(4, 390px); gap: 18px; }
+  .mobile .frame { width: 390px; height: 844px; }
+  .mobile iframe { width: 390px; height: 844px; transform: none; }
+  .site { display: grid; grid-template-columns: 190px 1fr; min-height: 100vh; background: white; }
+  aside { padding: 28px 22px; background: #f7f9fc; border-right: 1px solid #e5e9f0; }
+  aside strong { font-size: 21px; color: #285ea8; }
+  aside p { margin: 24px 0; color: #65748b; }
+  main { padding: 30px; }
+  .site-label { color: #77869c; margin-bottom: 28px; }
+  main h2 { font-size: 26px; margin: 0; }
+  .intro { color: #65748b; margin: 4px 0 24px; }
+  .navigation-controls { display: flex; align-items: center; gap: 20px; padding: 14px 0; border-bottom: 1px solid #e5e9f0; color: #3265b3; }
+  .topic { padding: 22px 0; border-bottom: 1px solid #e5e9f0; }
+  .topic strong { font-size: 17px; }
+  .topic p { margin: 5px 0 0; color: #77869c; }
+  @media(max-width:600px) { .site { display: block; } aside { display: none; } main { padding: 20px 16px; } .navigation-controls { gap: 12px; } }
+</style>
+<body>
+<script>
+  const params = new URLSearchParams(location.search);
+  const scene = params.get('scene');
+  const prefix = 'houmao-linux-do-topic-filter';
+  const topics = [
+    { id: 101, title: '抽奖：开源工具体验名额', tags: ['人工智能'], category_id: 2 },
+    { id: 102, title: '本地模型部署指南', tags: ['人工智能', '教程'], category_id: 2 },
+    { id: 103, title: '周末活动与资源领取', tags: ['活动'], category_id: 3 },
+    { id: 104, title: '开源项目的搜索体验优化', tags: ['开发'], category_id: 1 },
+    { id: 105, title: '一次前端性能排查记录', tags: ['经验分享'], category_id: 1 },
+  ];
+  const categories = [{ id: 1, name: '开发调优' }, { id: 2, name: '工具', parent_category_id: 1 }, { id: 3, name: '福利羊毛' }];
+  const layouts = {
+    desktop: { title: '桌面主流程', frames: [
+      ['entry', '01 · 浏览入口'], ['records', '02 · 过滤记录与命中原因'],
+      ['rules', '03 · 查找类别与标签候选'], ['changes', '04 · 新增过滤与将恢复显示'],
+      ['retained', '05 · 保留清单'], ['saved', '06 · 保存后更新比较基线'],
+    ] },
+    mobile: { title: '窄屏操作', frames: [
+      ['entry', '01 · 浏览入口'], ['records', '02 · 过滤记录'],
+      ['rules', '03 · 规则与候选'], ['changes', '04 · 变化预览与保存'],
+    ] },
+    states: { title: '状态与单帖操作', frames: [
+      ['menu', '01 · 单帖菜单'], ['kept', '02 · 保留成功'],
+      ['empty', '03 · 没有命中'], ['no-data', '04 · 尚无帖子数据'],
+      ['first', '05 · 首次设置'], ['failed', '06 · 保存失败，草稿继续保留'],
+    ] },
+  };
+  if (!scene) {
+    document.body.className = 'diagram';
+    const layout = params.get('layout') || 'desktop';
+    const spec = layouts[layout];
+    const header = document.createElement('header');
+    const heading = document.createElement('h1');
+    heading.textContent = `帖子过滤器 · ${spec.title}`;
+    const note = document.createElement('p');
+    note.textContent = '0.6.0 · 示例帖子 · 类别／标签候选与变化预览';
+    header.append(heading, note);
+    const board = document.createElement('div');
+    board.className = `board ${layout === 'mobile' ? 'mobile' : ''}`;
+    for (const [state, label] of spec.frames) {
+      const figure = document.createElement('figure');
+      const frame = document.createElement('div');
+      frame.className = 'frame';
+      const iframe = document.createElement('iframe');
+      iframe.src = `?scene=${state}`;
+      iframe.title = label;
+      frame.append(iframe);
+      const caption = document.createElement('figcaption');
+      caption.textContent = label;
+      figure.append(frame, caption);
+      board.append(figure);
+    }
+    document.body.append(header, board);
+  } else {
+    // 场景只使用内存存储，重新载入即可还原，不接触扩展中的个人规则。
+    const stored = { keywords: ['first', 'empty'].includes(scene) ? '' : '抽奖' };
+    if (scene === 'retained') stored.allowedTopics = [{ id: '101', title: topics[0].title }];
+    window.GM_getValue = (key, fallback) => stored[key] ?? fallback;
+    window.GM_setValue = (key, value) => scene === 'failed' ? Promise.reject(new Error('示例保存失败')) : Promise.resolve(stored[key] = value);
+    window.GM_registerMenuCommand = () => {};
+    document.body.innerHTML = `<div class="site"><aside><strong>LINUX DO</strong><p>首页</p><p>全部帖子</p><p>热门</p><p>我的帖子</p><p>社区分类</p><p>开发调优</p><p>福利羊毛</p></aside><main><div class="site-label">界面演示 · 示例数据</div><h2>最新话题</h2><p class="intro">技术交流、经验分享与日常讨论</p><div class="navigation-controls"><span>最新</span><span>未读</span><span>热门</span></div><section id="topic-list"></section></main></div>`;
+    const data = document.createElement('script');
+    data.type = 'application/json';
+    data.id = 'data-preloaded';
+    data.textContent = JSON.stringify({ site: { categories }, ...(scene === 'no-data' ? {} : { list: { topic_list: { topics, more_topics_url: null } } }) });
+    document.head.append(data);
+    const script = document.createElement('script');
+    script.src = '../../../scripts/linux-do-topic-filter.user.js';
+    script.onload = async () => {
+      const control = (name) => document.querySelector(`.${prefix}-${name}`);
+      const visibleTopics = JSON.parse(data.textContent).list?.topic_list.topics || [];
+      for (const topic of visibleTopics) {
+        const row = document.createElement('article');
+        row.className = 'topic';
+        const title = document.createElement('strong');
+        title.textContent = topic.title;
+        const tags = document.createElement('p');
+        tags.textContent = topic.tags.join(' · ');
+        row.append(title, tags);
+        document.getElementById('topic-list').append(row);
+      }
+      if (scene === 'entry') return;
+      control('launcher').click();
+      if (['rules', 'changes', 'saved', 'failed', 'first'].includes(scene)) control('rules-tab').click();
+      if (['rules', 'changes', 'saved', 'failed'].includes(scene)) {
+        control('title-chips').querySelector('button').click();
+        control('tag-candidates').value = '活动';
+        control('tag-candidates').dispatchEvent(new Event('change'));
+      }
+      if (scene === 'rules') {
+        control('category-input').value = '开发';
+        control('category-input').dispatchEvent(new Event('input'));
+      }
+      if (['changes', 'failed'].includes(scene)) {
+        control('added-summary').click();
+        control('restored-summary').click();
+      }
+      if (['saved', 'failed'].includes(scene)) {
+        control('save').click();
+        await new Promise(requestAnimationFrame);
+      }
+      if (['changes', 'saved', 'failed'].includes(scene)) control('content').scrollTop = control('content').scrollHeight;
+      if (scene === 'retained') {
+        control('header-menu').click();
+        control('menu').querySelector('button').click();
+      }
+      if (['menu', 'kept'].includes(scene)) {
+        control('actual-list').querySelector('button').click();
+        if (scene === 'kept') control('menu').querySelector('button').click();
+      }
+    };
+    document.head.append(script);
+  }
+</script>
+</body>
+</html>

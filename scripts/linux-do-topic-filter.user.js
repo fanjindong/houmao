@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.5.1
+// @version      0.6.0
 // @description  按标题、标签和类别过滤帖子，查看过滤记录并放行单帖
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -107,6 +107,19 @@
     return { topic, title, href, matches };
   };
 
+  const ruleCandidates = (key, topics, categoriesById) => {
+    if (key === 'category') {
+      return [...categoriesById.values()].map((category) => ({
+        value: category.name.trim(),
+        label: `${categoryNames(category.id, categoriesById).join(' › ')} · 包含子类别`,
+      })).filter(({ value }) => value);
+    }
+    const tags = topics.flatMap((topic) => Array.isArray(topic.tags) ? topic.tags : [])
+      .map((tag) => typeof tag === 'string' ? tag : tag?.name)
+      .filter((tag) => typeof tag === 'string');
+    return parseKeywords(tags.join('\n')).map((value) => ({ value, label: value }));
+  };
+
   const filterTopicPayload = (payload, rules, categoriesById, rememberTopics) => {
     if (!payload || typeof payload !== 'object') return false;
     indexPayloadCategories(payload, categoriesById);
@@ -174,6 +187,7 @@
     tag: 'tagKeywords',
     category: 'categoryKeywords',
     allowed: 'allowedTopics',
+    rules: 'filterRules',
   };
   const prefix = 'houmao-linux-do-topic-filter';
   const pageWindow = typeof unsafeWindow === 'undefined' ? window : unsafeWindow;
@@ -184,11 +198,11 @@
   let allowedTopics = new Map((Array.isArray(storedAllowed) ? storedAllowed : [])
     .filter((topic) => topic && /^\d+$/.test(String(topic.id)) && typeof topic.title === 'string')
     .map((topic) => [String(topic.id), { id: String(topic.id), title: topic.title }]));
-  let filters = {
-    title: parseKeywords(GM_getValue(storageKeys.title, '')),
-    tag: parseKeywords(GM_getValue(storageKeys.tag, '')),
-    category: parseKeywords(GM_getValue(storageKeys.category, '')),
-  };
+  // 旧配置只在尚未保存整份规则时读取，避免刷新后混用不同批次的规则。
+  const storedRules = GM_getValue(storageKeys.rules, null);
+  let filters = Object.fromEntries(['title', 'tag', 'category'].map((key) => [key,
+    parseKeywords(storedRules === null ? GM_getValue(storageKeys[key], '') : storedRules?.[key]),
+  ]));
   let drawer;
   let statusButton;
   let savingAllowed = false;
@@ -343,6 +357,10 @@
     .${prefix}-preview-heading h3 { margin: 0; font-size: 14px; font-weight: 600; }
     .${prefix}-status { margin: 0; font-size: 12px; color: var(--hm-muted); }
     .${prefix}-preview-hint { margin-top: 8px; }
+    .${prefix}-preview-section details { margin-top: 12px; }
+    .${prefix}-preview-section summary { cursor: pointer; font-size: 13px; }
+    .${prefix}-candidate-hint { margin-top: 7px; }
+    .${prefix}-drawer .${prefix}-candidates { width: 100%; margin-top: 8px; }
     .${prefix}-preview li { padding: 12px 0; }
     .${prefix}-preview .${prefix}-topic-link { font-size: 13px; font-weight: 500; }
     .${prefix}-footer { flex: 0 0 auto; padding: 14px 24px max(16px, env(safe-area-inset-bottom)); border-top: 1px solid var(--hm-line); background: var(--hm-surface); }
@@ -524,8 +542,18 @@
   const renderPreview = () => {
     const rules = draftRules();
     const data = pageData();
-    const matches = [...(data?.topics.values() || [])]
-      .map((topic) => topicDetails(topic, rules, categoriesById)).filter((entry) => entry.matches.length);
+    const topics = [...(data?.topics.values() || [])];
+    const savedRules = activeRules();
+    const matches = [];
+    const added = [];
+    const restored = [];
+    for (const topic of topics) {
+      const before = topicDetails(topic, savedRules, categoriesById);
+      const after = topicDetails(topic, rules, categoriesById);
+      if (after.matches.length) matches.push(after);
+      if (!before.matches.length && after.matches.length) added.push(after);
+      if (before.matches.length && !after.matches.length) restored.push(before);
+    }
     control('status').textContent = data ? `预计过滤 ${matches.length} 条` : '尚无帖子数据';
     const hasRules = ['title', 'category', 'tag'].some((key) => rules[key].length);
     const hint = !hasRules ? '添加规则后查看命中结果' : !data ? '浏览帖子列表后，可预览命中结果' : !matches.length ? '当前已读取的帖子均未命中草稿规则' : '';
@@ -534,6 +562,38 @@
     const fragment = document.createDocumentFragment();
     for (const details of matches) fragment.append(topicItem(details));
     control('preview').replaceChildren(fragment);
+    control('changes').hidden = !data;
+    for (const [name, entries, label] of [['added', added, '新增过滤'], ['restored', restored, '将恢复显示']]) {
+      control(`${name}-summary`).textContent = `${label} ${entries.length} 条`;
+      const list = document.createDocumentFragment();
+      for (const entry of entries) list.append(topicItem(entry));
+      control(`${name}-list`).replaceChildren(list);
+    }
+    for (const key of ['category', 'tag']) {
+      const editor = editors.get(key);
+      const candidates = ruleCandidates(key, topics, categoriesById);
+      const selected = new Set(draft[key].map((value) => value.toLowerCase()));
+      const query = editor.input.value.trim().toLowerCase();
+      const options = document.createDocumentFragment();
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '选择候选以添加';
+      options.append(placeholder);
+      let count = 0;
+      for (const { value, label } of candidates) {
+        if (selected.has(value.toLowerCase())) continue;
+        if (query && !label.toLowerCase().includes(query)) continue;
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        options.append(option);
+        count += 1;
+      }
+      if (!count) placeholder.textContent = '暂无匹配候选，可输入完整名称';
+      editor.candidates.replaceChildren(options);
+      editor.candidates.value = '';
+      editor.candidates.disabled = savingRules || !count;
+    }
   };
 
   const renderChips = (key) => {
@@ -562,6 +622,7 @@
     }
     editor.chips.replaceChildren(fragment);
     editor.input.disabled = editor.add.disabled = savingRules;
+      if (editor.candidates) editor.candidates.disabled = savingRules || editor.candidates.children.length <= 1;
   };
 
   const commitInput = (key) => {
@@ -635,8 +696,11 @@
     control('save').disabled = control('save-refresh').disabled = control('close').disabled = true;
     for (const key of editors.keys()) renderChips(key);
     try {
-      await Promise.all(['title', 'category', 'tag'].map((key) => GM_setValue(storageKeys[key], next[key].join('\n'))));
+      await GM_setValue(storageKeys.rules, Object.fromEntries(
+        ['title', 'category', 'tag'].map((key) => [key, next[key].join('\n')]),
+      ));
       filters = next;
+      renderPreview();
       if (refresh) pageWindow.location.reload();
       else showNotice('已保存，将用于后续加载');
     } catch {
@@ -681,7 +745,12 @@
             <section class="${prefix}-preview-section" aria-label="草稿预览">
               <div class="${prefix}-preview-heading"><h3>草稿预览</h3><p class="${prefix}-status" aria-live="polite"></p></div>
               <p class="${prefix}-hint ${prefix}-preview-hint"></p>
-              <ul class="${prefix}-topic-list ${prefix}-preview" aria-label="草稿预计过滤的帖子"></ul>
+              <div class="${prefix}-changes" hidden>
+                <p class="${prefix}-hint">与已保存规则比较，仅计算本页已读取的帖子；刷新后应用到当前列表。恢复项展示原命中原因。</p>
+                <details><summary class="${prefix}-added-summary"></summary><ul class="${prefix}-topic-list ${prefix}-added-list" aria-label="新增过滤的帖子"></ul></details>
+                <details><summary class="${prefix}-restored-summary"></summary><ul class="${prefix}-topic-list ${prefix}-restored-list" aria-label="将恢复显示的帖子"></ul></details>
+              </div>
+              <details><summary>全部预计过滤的帖子</summary><ul class="${prefix}-topic-list ${prefix}-preview" aria-label="草稿预计过滤的帖子"></ul></details>
             </section>
           </section>
           <section class="${prefix}-retained-panel" aria-label="保留清单" hidden>
@@ -744,6 +813,25 @@
       add.addEventListener('click', () => { commitInput(key); input.focus(); });
       row.append(input, add);
       group.append(chips, row);
+      if (key !== 'title') {
+        const candidates = document.createElement('select');
+        candidates.className = `${prefix}-input ${prefix}-candidates ${prefix}-${key}-candidates`;
+        candidates.setAttribute('aria-label', `${label}候选`);
+        input.placeholder = '输入以查找候选，或回车添加';
+        editors.get(key).candidates = candidates;
+        candidates.addEventListener('change', () => {
+          if (!candidates.value) return;
+          input.value = candidates.value;
+          commitInput(key);
+          input.focus();
+        });
+        const sourceHint = document.createElement('p');
+        sourceHint.className = `${prefix}-hint ${prefix}-candidate-hint`;
+        sourceHint.textContent = key === 'category'
+          ? '候选来自已取得的类别，显示父子关系；同名类别按名称一并匹配。'
+          : '候选来自本页已读取帖子的标签，也可输入其他完整名称。';
+        group.append(candidates, sourceHint);
+      }
       control('editors').append(group);
     }
     for (const name of ['records', 'rules']) {

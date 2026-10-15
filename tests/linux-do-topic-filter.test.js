@@ -383,7 +383,7 @@ test('空结果与尚无数据分开，重复帖子不增加计数，实际原�
   await control(browser.drawer, 'rules-tab').dispatch('click');
   assert.deepEqual(titles(control(browser.drawer, 'preview')), ['Beta 指南']);
   await control(browser.drawer, 'save').dispatch('click');
-  assert.equal(browser.stored.get('keywords'), 'beta');
+  assert.equal(browser.stored.get('filterRules').title, 'beta');
   assert.equal(browser.reloadCount, 0);
   assert.match(control(browser.drawer, 'notice-text').textContent, /已保存/);
   await control(browser.drawer, 'records-tab').dispatch('click');
@@ -427,7 +427,7 @@ test('规则输入尚未按回车时，预览及保存也包含待添加词条',
   await control(browser.drawer, 'title-input').dispatch('input');
   assert.equal(control(browser.drawer, 'status').textContent, '预计过滤 1 条');
   await control(browser.drawer, 'save').dispatch('click');
-  assert.equal(browser.stored.get('keywords'), 'Beta');
+  assert.equal(browser.stored.get('filterRules').title, 'Beta');
   assert.equal(control(browser.drawer, 'title-input').value, '');
 });
 
@@ -563,11 +563,11 @@ test('保存并刷新等待写入且阻止重复提交，失败后保留草稿�
   const pending = control(browser.drawer, 'save-refresh').dispatch('click');
   assert.equal(control(browser.drawer, 'title-input').disabled, true);
   await control(browser.drawer, 'save-refresh').dispatch('click');
-  assert.equal(writes.length, 3);
+  assert.equal(writes.length, 1);
   assert.equal((await browser.drawer.dispatch('cancel')).defaultPrevented, true);
-  writes[0](); writes[1](); assert.equal(browser.reloadCount, 0); writes[2](); await pending;
+  assert.equal(browser.reloadCount, 0); writes[0](); await pending;
   assert.equal(browser.reloadCount, 1);
-  assert.equal(browser.stored.get('keywords'), 'beta');
+  assert.equal(browser.stored.get('filterRules').title, 'beta');
 
   const failed = createBrowser({ writeValue: () => Promise.reject(new Error('storage failed')) });
   failed.menuCommand(); await removeKeywords(failed, 'title'); await addKeyword(failed, 'title', 'beta');
@@ -600,4 +600,143 @@ test('响应改写失败不会谎报已过滤', () => {
   xhr.readyState = 4; for (const callback of [...xhr.listeners.readystatechange]) callback();
   assert.match(browser.launcher.title, /尚未取得/);
   assert.equal(JSON.parse(xhr.responseText).topic_list.topics.length, 1);
+});
+
+test('整份规则一次写入，失败及重新打开均保留旧配置，成功后优先于旧键', async () => {
+  const initialStored = [['keywords', 'alpha'], ['categoryKeywords', '旧类别'], ['tagKeywords', '旧标签']];
+  const writes = [];
+  const failed = createBrowser({ initialStored, writeValue: (key) => {
+    writes.push(key);
+    return Promise.reject(new Error('storage failed'));
+  } });
+  failed.menuCommand();
+  for (const key of ['title', 'category', 'tag']) await removeKeywords(failed, key);
+  await addKeyword(failed, 'title', 'beta');
+  await addKeyword(failed, 'category', '新类别');
+  await addKeyword(failed, 'tag', '新标签');
+  await control(failed.drawer, 'save').dispatch('click');
+  assert.deepEqual(writes, ['filterRules']);
+  assert.deepEqual([...failed.stored], initialStored);
+  const reloaded = createBrowser({ initialStored: [...failed.stored] });
+  reloaded.menuCommand();
+  assert.equal(control(reloaded.drawer, 'title-chips').textContent, 'alpha');
+  assert.equal(control(reloaded.drawer, 'category-chips').textContent, '旧类别');
+  assert.equal(control(reloaded.drawer, 'tag-chips').textContent, '旧标签');
+  await removeKeywords(reloaded, 'title');
+  await control(reloaded.drawer, 'save').dispatch('click');
+  assert.deepEqual(JSON.parse(JSON.stringify(reloaded.stored.get('filterRules'))), {
+    title: '', category: '旧类别', tag: '旧标签',
+  });
+  const migrated = createBrowser({ initialStored: [...reloaded.stored] });
+  migrated.menuCommand();
+  assert.equal(control(migrated.drawer, 'title-chips').textContent, '');
+  assert.equal(control(migrated.drawer, 'category-chips').textContent, '旧类别');
+  assert.equal(migrated.stored.get('keywords'), 'alpha');
+});
+
+test('类别候选展示层级，标签候选从本页原始帖子去重且随分页更新', async () => {
+  const browser = createBrowser({ initialStored: [['keywords', '一']] });
+  const preload = new browser.Element('script');
+  browser.setPreload(preload);
+  preload.textContent = JSON.stringify({
+    site: { categories: [{ id: 1, name: '开发' }, { id: 2, name: '工具', parent_category_id: 1 }] },
+    list: { topic_list: { topics: [{ id: 1, title: '一', tags: ['AI', { name: 'ai' }, { name: '工具' }], category_id: 2 }] } },
+  });
+  browser.observe();
+  browser.menuCommand();
+  const categories = control(browser.drawer, 'category-candidates');
+  assert.deepEqual(categories.children.slice(1).map((option) => [option.value, option.textContent]), [
+    ['开发', '开发 · 包含子类别'], ['工具', '开发 › 工具 · 包含子类别'],
+  ]);
+  control(browser.drawer, 'category-input').value = '工';
+  await control(browser.drawer, 'category-input').dispatch('input');
+  assert.deepEqual(categories.children.slice(1).map((option) => option.value), ['工具']);
+  categories.value = '工具';
+  await categories.dispatch('change');
+  assert.equal(control(browser.drawer, 'category-chips').textContent, '工具');
+  assert.equal(control(browser.drawer, 'category-input').value, '');
+  const tags = control(browser.drawer, 'tag-candidates');
+  assert.deepEqual(tags.children.slice(1).map((option) => option.value), ['AI', '工具']);
+  tags.value = 'AI';
+  await tags.dispatch('change');
+  assert.equal(control(browser.drawer, 'tag-chips').textContent, 'AI');
+  assert.deepEqual(tags.children.slice(1).map((option) => option.value), ['工具']);
+  respondTopics(browser, [{ id: 2, title: '二', tags: ['新标签'] }], '/latest.json?page=1');
+  assert.deepEqual(tags.children.slice(1).map((option) => option.value), ['工具', '新标签']);
+  browser.pageWindow.history.pushState({}, '', '/top');
+  assert.equal(tags.children.length, 1);
+  assert.equal(tags.disabled, true);
+  assert.equal(categories.children.length, 2);
+});
+
+test('已有整份配置保存失败后，刷新继续使用上一份完整规则', async () => {
+  const previous = { title: 'alpha', category: '旧类别', tag: '旧标签' };
+  const browser = createBrowser({
+    initialStored: [['filterRules', previous], ['keywords', '过时标题']],
+    writeValue: () => Promise.reject(new Error('storage failed')),
+  });
+  browser.menuCommand();
+  for (const key of ['title', 'category', 'tag']) {
+    await removeKeywords(browser, key);
+    await addKeyword(browser, key, '新规则');
+  }
+  await control(browser.drawer, 'save-refresh').dispatch('click');
+  assert.deepEqual(browser.stored.get('filterRules'), previous);
+  assert.equal(browser.reloadCount, 0);
+  const next = createBrowser({ initialStored: [...browser.stored] });
+  next.menuCommand();
+  for (const key of ['title', 'category', 'tag']) {
+    assert.equal(control(next.drawer, `${key}-chips`).textContent, previous[key]);
+  }
+});
+
+test('变化预览对比同批原始帖子，尊重保留项，保存后基线更新而实际记录不变', async () => {
+  const browser = createBrowser({ initialStored: [
+    ['keywords', 'alpha'], ['allowedTopics', [{ id: '3', title: 'Beta 保留' }]],
+  ] });
+  respondTopics(browser, [
+    { id: 1, title: 'Alpha' }, { id: 2, title: 'Beta' },
+    { id: 3, title: 'Beta 保留' }, { id: 4, title: 'Alpha Beta' },
+  ]);
+  browser.menuCommand();
+  assert.equal(control(browser.drawer, 'added-summary').textContent, '新增过滤 0 条');
+  await removeKeywords(browser, 'title');
+  control(browser.drawer, 'title-input').value = 'beta';
+  await control(browser.drawer, 'title-input').dispatch('input');
+  assert.deepEqual(titles(control(browser.drawer, 'added-list')), ['Beta']);
+  assert.deepEqual(titles(control(browser.drawer, 'restored-list')), ['Alpha']);
+  assert.deepEqual(titles(control(browser.drawer, 'preview')), ['Beta', 'Alpha Beta']);
+  respondTopics(browser, [{ id: 5, title: 'Beta 新增' }], '/latest.json?page=1');
+  assert.equal(control(browser.drawer, 'added-summary').textContent, '新增过滤 2 条');
+  await control(browser.drawer, 'save').dispatch('click');
+  assert.equal(control(browser.drawer, 'added-summary').textContent, '新增过滤 0 条');
+  assert.equal(control(browser.drawer, 'restored-summary').textContent, '将恢复显示 0 条');
+  await control(browser.drawer, 'records-tab').dispatch('click');
+  assert.deepEqual(titles(control(browser.drawer, 'actual-list')), ['Alpha', 'Alpha Beta']);
+});
+
+test('首屏及连续分页全部过滤时保留后续链接，末页保留空终止标记', () => {
+  const browser = createBrowser();
+  const preload = new browser.Element('script');
+  browser.setPreload(preload);
+  preload.textContent = JSON.stringify({ list: { topic_list: {
+    topics: [{ id: 1, title: 'Alpha 首屏' }], more_topics_url: '/latest?page=1',
+  } } });
+  browser.observe();
+  const first = JSON.parse(preload.textContent).list.topic_list;
+  assert.deepEqual(first.topics, []);
+  assert.equal(first.more_topics_url, '/latest?page=1');
+  for (const [page, type] of [[1, ''], [2, 'json'], [3, '']]) {
+    const xhr = new browser.FakeXHR();
+    xhr.responseType = type;
+    xhr.open('GET', `/latest.json?page=${page}`);
+    xhr.respond({ topic_list: {
+      topics: [{ id: page + 1, title: 'Alpha 后续' }],
+      more_topics_url: page === 3 ? null : `/latest?page=${page + 1}`,
+    } });
+    const list = (type === 'json' ? xhr.response : JSON.parse(xhr.responseText)).topic_list;
+    assert.equal(list.topics.length, 0);
+    assert.equal(list.more_topics_url, page === 3 ? null : `/latest?page=${page + 1}`);
+  }
+  assert.equal(browser.launcher.textContent, '过滤 4');
 });
