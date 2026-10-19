@@ -219,6 +219,7 @@ const createBrowser = ({ initialStored, writeValue, withToolbar = true } = {}) =
     showPopover() { this.popoverOpen = true; }
     hidePopover() { this.popoverOpen = false; this.dispatch('toggle', { newState: 'closed' }); }
     focus() { document.activeElement = this; }
+    scrollIntoView(options) { this.scrollOptions = options; }
     getBoundingClientRect() { return { top: 100, right: 1000, bottom: 136, width: 208, height: 100 }; }
   }
   class FakeXHR {
@@ -516,7 +517,7 @@ test('更多菜单放行单帖，保留清单可撤销；刷新后优先于三�
   const source = JSON.stringify({ site: JSON.stringify({ categories: [{ id: 10, name: '福利羊毛' }] }), topicList: JSON.stringify({ topic_list: { topics: [topic] } }) });
   const preload = new browser.Element('script'); preload.textContent = source; browser.setPreload(preload); browser.observe();
   await browser.launcher.dispatch('click');
-  assert.equal(control(browser.drawer, 'actual-list').querySelectorAll('button').length, 1, '每行只显示更多入口');
+  assert.equal(control(browser.drawer, 'actual-list').querySelectorAll('.houmao-linux-do-topic-filter-topic-menu').length, 1);
   const menu = await openRowMenu(browser, 'actual-list');
   assert.equal(menu.popoverOpen, true);
   assert.equal(menu.children[0].textContent, '打开帖子');
@@ -524,7 +525,7 @@ test('更多菜单放行单帖，保留清单可撤销；刷新后优先于三�
   assert.equal(menu.popoverOpen, false);
   assert.deepEqual(JSON.parse(JSON.stringify(browser.stored.get('allowedTopics'))), [{ id: '42', title: 'Alpha 抽奖' }]);
   assert.match(control(browser.drawer, 'notice-text').textContent, /已保留此帖/);
-  assert.equal(browser.launcher.textContent, '过滤 1');
+  assert.equal(browser.launcher.textContent, '过滤 1 · 待刷新');
   await control(browser.drawer, 'rules-tab').dispatch('click');
   assert.equal(control(browser.drawer, 'status').textContent, '预计过滤 0 条');
   await showRetained(browser);
@@ -739,4 +740,102 @@ test('首屏及连续分页全部过滤时保留后续链接，末页保留空�
     assert.equal(list.more_topics_url, page === 3 ? null : `/latest?page=${page + 1}`);
   }
   assert.equal(browser.launcher.textContent, '过滤 4');
+});
+
+test('每个命中原因分别定位对应词条，保留其他草稿及待添加输入', async () => {
+  const browser = createBrowser({ initialStored: [['keywords', 'alpha\n发布'], ['tagKeywords', 'AI'], ['categoryKeywords', '开发']] });
+  const preload = new browser.Element('script');
+  preload.textContent = JSON.stringify({ site: { categories: [{ id: 1, name: '开发' }] }, list: { topic_list: {
+    topics: [{ id: 1, title: 'Alpha 发布', tags: ['ai'], category_id: 1 }],
+  } } });
+  browser.setPreload(preload); browser.observe();
+  browser.menuCommand();
+  control(browser.drawer, 'title-input').value = '未提交输入';
+  await addKeyword(browser, 'tag', '草稿标签');
+  for (const [key, keyword] of [['title', 'alpha'], ['title', '发布'], ['tag', 'AI'], ['category', '开发']]) {
+    await control(browser.drawer, 'records-tab').dispatch('click');
+    const reason = control(browser.drawer, 'actual-list').querySelectorAll('.houmao-linux-do-topic-filter-match-button')
+      .find((button) => button.getAttribute('aria-label').endsWith(`：${keyword}`));
+    await reason.dispatch('click');
+    assert.equal(control(browser.drawer, 'rules-panel').hidden, false);
+    const chip = control(browser.drawer, `${key}-chips`).querySelector('.houmao-linux-do-topic-filter-chip-located');
+    assert.equal(chip.textContent, keyword);
+    assert.equal(browser.document.activeElement, chip);
+    assert.equal(chip.scrollOptions.block, 'nearest');
+    assert.equal(control(browser.drawer, 'title-input').value, '未提交输入');
+    assert.match(control(browser.drawer, 'tag-chips').textContent, /草稿标签/);
+  }
+  assert.equal(browser.stored.has('filterRules'), false);
+});
+
+test('历史原因对应词条已删除时说明草稿状态，不自动加回；重开清除定位', async () => {
+  const browser = createBrowser();
+  respondTopics(browser, [{ id: 1, title: 'Alpha' }]);
+  browser.menuCommand();
+  await removeKeywords(browser, 'title');
+  await control(browser.drawer, 'records-tab').dispatch('click');
+  await control(browser.drawer, 'actual-list').querySelector('.houmao-linux-do-topic-filter-match-button').dispatch('click');
+  assert.equal(control(browser.drawer, 'title-chips').children.length, 0);
+  assert.match(control(browser.drawer, 'title-location').textContent, /已不在当前草稿/);
+  assert.equal(browser.document.activeElement, control(browser.drawer, 'title-input'));
+  assert.equal(control(browser.drawer, 'restored-summary').textContent, '将恢复显示 1 条');
+  await control(browser.drawer, 'close').dispatch('click');
+  browser.menuCommand();
+  assert.equal(control(browser.drawer, 'title-location').hidden, true);
+  assert.equal(control(browser.drawer, 'title-chips').textContent, 'alpha');
+});
+
+test('待刷新提示随缓存列表保留，后续分页与关闭侧栏不清除，新列表不误报', async () => {
+  const browser = createBrowser();
+  respondTopics(browser, [{ id: 1, title: 'Alpha 首页' }]);
+  respondTopics(browser, [{ id: 2, title: 'Beta 类别' }], '/c/4/l/latest.json');
+  browser.menuCommand();
+  await addKeyword(browser, 'title', 'beta');
+  await control(browser.drawer, 'save').dispatch('click');
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, false);
+  assert.match(browser.launcher.textContent, /待刷新/);
+  const result = respondTopics(browser, [{ id: 3, title: 'Beta 分页' }], '/latest.json?page=1');
+  assert.equal(result.topic_list.topics.length, 0);
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, false);
+  await control(browser.drawer, 'close').dispatch('click');
+  await browser.launcher.dispatch('click');
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, false);
+  assert.equal(control(browser.drawer, 'notice').hidden, true);
+  browser.pageWindow.history.pushState({}, '', '/c/develop/4');
+  assert.match(browser.launcher.textContent, /待刷新/);
+  respondTopics(browser, [{ id: 4, title: '新列表' }], '/top.json');
+  browser.pageWindow.history.pushState({}, '', '/top');
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, true);
+  assert.doesNotMatch(browser.launcher.textContent, /待刷新/);
+  browser.pageWindow.history.pushState({}, '', '/latest');
+  await control(browser.drawer, 'refresh-list').dispatch('click');
+  assert.equal(browser.reloadCount, 1);
+  const reloaded = createBrowser({ initialStored: [...browser.stored] });
+  respondTopics(reloaded, [{ id: 1, title: 'Alpha 首页' }]);
+  await reloaded.launcher.dispatch('click');
+  assert.equal(control(reloaded.drawer, 'pending-refresh').hidden, true);
+});
+
+test('相同规则及失败保存不产生待刷新提示，已有提示不会被失败保存清除', async () => {
+  let fail = false;
+  const browser = createBrowser({ writeValue: (key, value, stored) => {
+    if (fail) throw new Error('storage failed');
+    stored.set(key, value);
+  } });
+  respondTopics(browser, [{ id: 1, title: 'Alpha' }]);
+  browser.menuCommand();
+  await removeKeywords(browser, 'title'); await addKeyword(browser, 'title', 'ALPHA');
+  await control(browser.drawer, 'save').dispatch('click');
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, true);
+  await addKeyword(browser, 'title', 'beta');
+  fail = true;
+  await control(browser.drawer, 'save').dispatch('click');
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, true);
+  fail = false;
+  await control(browser.drawer, 'save').dispatch('click');
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, false);
+  fail = true;
+  await addKeyword(browser, 'title', 'gamma');
+  await control(browser.drawer, 'save').dispatch('click');
+  assert.equal(control(browser.drawer, 'pending-refresh').hidden, false);
 });

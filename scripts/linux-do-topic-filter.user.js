@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO 帖子过滤器
 // @namespace    https://github.com/fanjindong/houmao
-// @version      0.6.0
+// @version      0.7.0
 // @description  按标题、标签和类别过滤帖子，查看过滤记录并放行单帖
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -210,6 +210,7 @@
   let view = 'records';
   let previousView = 'records';
   let draft;
+  let locatedRule;
   let menuTrigger;
   const editors = new Map();
 
@@ -330,6 +331,7 @@
     .${prefix}-topic-link:hover { color: var(--hm-accent); }
     .${prefix}-topic-menu { flex: 0 0 auto; margin: -5px -6px -5px 0; }
     .${prefix}-match { display: block; margin-top: 5px; color: var(--hm-muted); font-size: 12px; overflow-wrap: anywhere; }
+    .${prefix}-match-button { font: inherit; text-align: left; text-decoration: underline; text-underline-offset: 3px; margin-right: 8px; }
     .${prefix}-kept { flex: 0 0 auto; font-size: 12px; color: var(--hm-muted); padding-top: 2px; }
     .${prefix}-records-edit { margin-top: 24px; }
     .${prefix}-text-button { padding: 0; border: 0; background: transparent; color: var(--hm-accent); }
@@ -345,6 +347,10 @@
     .${prefix}-chips:not(:empty) { margin-bottom: 10px; }
     .${prefix}-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 4px 3px 9px; background: var(--hm-soft); border: 1px solid var(--hm-line); border-radius: 6px; font-size: 13px; }
     .${prefix}-chip-label { overflow-wrap: anywhere; min-width: 0; }
+    .${prefix}-chip-located { border-color: var(--hm-accent); outline: 2px solid var(--hm-accent); outline-offset: 2px; }
+    .${prefix}-rule-location { margin: 10px 0 0; color: var(--hm-accent); font-size: 13px; }
+    .${prefix}-pending-refresh { flex: 0 0 auto; margin: 12px 24px 0; padding: 10px 12px; border-radius: 6px; background: var(--hm-soft); font-size: 13px; }
+    .${prefix}-pending-refresh p { margin: 0 0 6px; }
     .${prefix}-chip-remove { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 4px; background: transparent; color: var(--hm-muted); }
     .${prefix}-chip-remove .${prefix}-icon { width: 13px; height: 13px; }
     .${prefix}-chip-remove:hover { background: var(--hm-line); color: var(--hm-text); }
@@ -398,6 +404,7 @@
       .${prefix}-icon-button { width: 44px; }
       .${prefix}-drawer .${prefix}-input { font-size: 16px; }
       .${prefix}-notice { margin: 0 16px 16px; }
+      .${prefix}-pending-refresh { margin: 12px 16px 0; }
       .${prefix}-menu-item { min-height: 44px; }
       .${prefix}-chip-remove { width: 30px; height: 30px; }
     }
@@ -496,7 +503,22 @@
     if (matches.length || retained) {
       const match = document.createElement('span');
       match.className = `${prefix}-match`;
-      match.textContent = retained ? '始终保留' : matches.map(({ label, keywords }) =>
+      if (retained) match.textContent = '始终保留';
+      else if (actions) {
+        for (const { label, keywords } of matches) {
+          const key = { 标题: 'title', 标签: 'tag', 类别: 'category' }[label];
+          for (const keyword of keywords) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `${prefix}-text-button ${prefix}-match-button`;
+            button.textContent = label === '标题' ? `标题包含「${keyword}」` : `${label}：${keyword}`;
+            button.setAttribute('aria-label', `定位${label}规则：${keyword}`);
+            button.disabled = busy();
+            button.addEventListener('click', () => locateRule(key, keyword));
+            match.append(button);
+          }
+        }
+      } else match.textContent = matches.map(({ label, keywords }) =>
         label === '标题' ? `标题包含「${keywords.join('、')}」` : `${label}：${keywords.join('、')}`,
       ).join('；');
       item.append(match);
@@ -602,6 +624,10 @@
     for (const keyword of draft[key]) {
       const chip = document.createElement('span');
       chip.className = `${prefix}-chip`;
+      chip.tabIndex = -1;
+      if (locatedRule?.key === key && locatedRule.keyword.toLowerCase() === keyword.toLowerCase()) {
+        chip.className += ` ${prefix}-chip-located`;
+      }
       const label = document.createElement('span');
       label.className = `${prefix}-chip-label`;
       label.textContent = keyword;
@@ -621,8 +647,26 @@
       fragment.append(chip);
     }
     editor.chips.replaceChildren(fragment);
+    editor.location.hidden = locatedRule?.key !== key;
+    if (!editor.location.hidden) {
+      const exists = draft[key].some((keyword) => keyword.toLowerCase() === locatedRule.keyword.toLowerCase());
+      editor.location.textContent = exists
+        ? `已定位「${locatedRule.keyword}」，可移除后添加新词条，并查看下方变化预览。`
+        : `「${locatedRule.keyword}」已不在当前草稿中；过滤记录保留处理当时的原因。`;
+    }
     editor.input.disabled = editor.add.disabled = savingRules;
       if (editor.candidates) editor.candidates.disabled = savingRules || editor.candidates.children.length <= 1;
+  };
+
+  const locateRule = (key, keyword) => {
+    if (busy()) return;
+    locatedRule = { key, keyword };
+    for (const editorKey of editors.keys()) renderChips(editorKey);
+    selectView('rules');
+    const editor = editors.get(key);
+    const target = editor.chips.querySelector(`.${prefix}-chip-located`) || editor.input;
+    target.focus();
+    target.scrollIntoView({ block: 'nearest' });
   };
 
   const commitInput = (key) => {
@@ -634,14 +678,17 @@
   };
 
   const renderStatus = () => {
+    const pending = !!pageData()?.needsRefresh;
     if (statusButton) {
-      const label = pageData() ? `过滤 ${pageData().filtered.size}` : '过滤';
+      const label = (pageData() ? `过滤 ${pageData().filtered.size}` : '过滤') + (pending ? ' · 待刷新' : '');
       const count = statusButton.querySelector(`.${prefix}-launcher-label`);
       if (count.textContent !== label) count.textContent = label;
-      statusButton.title = statusText();
-      statusButton.setAttribute('aria-label', `${statusText()}，打开帖子过滤器`);
+      statusButton.title = statusText() + (pending ? '，当前列表待刷新' : '');
+      statusButton.setAttribute('aria-label', `${statusButton.title}，打开帖子过滤器`);
     }
     if (!drawer?.open) return;
+    control('pending-refresh').hidden = !pending;
+    control('refresh-list').disabled = busy();
     if (view === 'records') renderRecords();
     if (view === 'rules') renderPreview();
     if (view === 'retained') renderRetained();
@@ -677,6 +724,7 @@
     try {
       await GM_setValue(storageKeys.allowed, [...next.values()]);
       allowedTopics = next;
+      for (const data of pages.values()) if (data.topics.has(id)) data.needsRefresh = true;
       showNotice(allow ? '已保留此帖，刷新后生效' : '已取消保留，刷新后生效', true);
     } catch {
       control('action-error').textContent = '保存失败，请重试。原有保留设置仍然有效。';
@@ -693,12 +741,18 @@
     const next = Object.fromEntries(['title', 'category', 'tag'].map((key) => [key, [...draft[key]]]));
     savingRules = true;
     control('rules-error').hidden = true;
-    control('save').disabled = control('save-refresh').disabled = control('close').disabled = true;
+    control('save').disabled = control('save-refresh').disabled = control('close').disabled = control('refresh-list').disabled = true;
     for (const key of editors.keys()) renderChips(key);
     try {
       await GM_setValue(storageKeys.rules, Object.fromEntries(
         ['title', 'category', 'tag'].map((key) => [key, next[key].join('\n')]),
       ));
+      const changed = ['title', 'category', 'tag'].some((key) => {
+        const saved = new Set(filters[key].map((keyword) => keyword.toLowerCase()));
+        return saved.size !== next[key].length || next[key].some((keyword) => !saved.has(keyword.toLowerCase()));
+      });
+      // 已加载的列表可能仍由 Discourse 缓存；后续分页不能证明整张列表已采用新规则。
+      if (changed) for (const data of pages.values()) if (data.topics.size) data.needsRefresh = true;
       filters = next;
       renderPreview();
       if (refresh) pageWindow.location.reload();
@@ -710,6 +764,7 @@
       savingRules = false;
       control('save').disabled = control('save-refresh').disabled = control('close').disabled = false;
       for (const key of editors.keys()) renderChips(key);
+      renderStatus();
     }
   };
 
@@ -729,6 +784,10 @@
           <button type="button" id="${prefix}-records-tab" class="${prefix}-tab ${prefix}-records-tab" role="tab" aria-selected="true" aria-controls="${prefix}-records-panel">过滤记录</button>
           <button type="button" id="${prefix}-rules-tab" class="${prefix}-tab ${prefix}-rules-tab" role="tab" aria-selected="false" aria-controls="${prefix}-rules-panel" tabindex="-1">规则设置</button>
         </nav>
+        <div class="${prefix}-pending-refresh" role="status" hidden>
+          <p>当前列表尚未按最新设置刷新。后续加载采用最新设置，过滤记录保留各帖处理时的结果。</p>
+          <button type="button" class="${prefix}-text-button ${prefix}-refresh-list">刷新当前列表</button>
+        </div>
         <div class="${prefix}-content">
           <p class="${prefix}-error ${prefix}-action-error" role="alert" hidden></p>
           <section id="${prefix}-records-panel" class="${prefix}-records-panel" role="tabpanel" aria-labelledby="${prefix}-records-tab">
@@ -795,7 +854,11 @@
       add.className = `${prefix}-add ${prefix}-${key}-add`;
       add.textContent = '添加';
       add.setAttribute('aria-label', `添加${label}`);
-      editors.set(key, { input, chips, add, label });
+      const location = document.createElement('p');
+      location.className = `${prefix}-rule-location ${prefix}-${key}-location`;
+      location.setAttribute('role', 'status');
+      location.hidden = true;
+      editors.set(key, { input, chips, add, label, location });
       input.addEventListener('input', renderPreview);
       input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
@@ -812,7 +875,7 @@
       });
       add.addEventListener('click', () => { commitInput(key); input.focus(); });
       row.append(input, add);
-      group.append(chips, row);
+      group.append(chips, row, location);
       if (key !== 'title') {
         const candidates = document.createElement('select');
         candidates.className = `${prefix}-input ${prefix}-candidates ${prefix}-${key}-candidates`;
@@ -854,6 +917,7 @@
     drawer.addEventListener('close', () => { closeMenu(); draft = undefined; });
     drawer.addEventListener('click', (event) => { if (event.target === drawer && !busy()) drawer.close(); });
     control('notice-refresh').addEventListener('click', () => { if (!busy()) pageWindow.location.reload(); });
+    control('refresh-list').addEventListener('click', () => { if (!busy()) pageWindow.location.reload(); });
     control('save').addEventListener('click', () => saveSettings(false));
     control('save-refresh').addEventListener('click', () => saveSettings(true));
     control('menu').addEventListener('toggle', (event) => {
@@ -873,6 +937,7 @@
   const openDrawer = (next = 'records') => {
     if (!drawer) initializeDrawer();
     if (!drawer.open) {
+      locatedRule = undefined;
       draft = Object.fromEntries(['title', 'category', 'tag'].map((key) => [key, [...filters[key]]]));
       for (const [key, editor] of editors) { editor.input.value = ''; renderChips(key); }
       control('rules-error').hidden = control('action-error').hidden = control('notice').hidden = true;
